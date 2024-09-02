@@ -7,6 +7,7 @@ pub struct Tokenizer <'a> {
     current: Option<char>,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum TokenType {
     LeftParen,
     RightParen,
@@ -14,6 +15,8 @@ pub enum TokenType {
     WhiteSpace,
 }
 
+
+#[derive(Debug)]
 pub struct Token {
     token_type: TokenType,
     lexeme: String,

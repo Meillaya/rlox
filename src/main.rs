@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 
 mod tokenizer;
+use tokenizer::{Tokenizer, Token};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -25,9 +26,18 @@ fn main() {
 
 
             if !file_contents.is_empty() {
-                panic!("Scanner not implemented");
+                
+                let mut tokenizer = Tokenizer::new(&file_contents);
+
+                let tokens = tokenizer.scan_tokens();
+
+                for token in tokens {
+                    println!("{:?}", token);
+
+                }
+                
             } else {
-                println!("EOF  null"); // Placeholder, remove this line when implementing the scanner
+                println!("EOF  null");
             }
         }
         _ => {
