@@ -1,4 +1,4 @@
-use std::{intrinsics::mir::PtrMetadata, str::Chars};
+use std::str::Chars;
 
 
 pub struct Tokenizer <'a> {
