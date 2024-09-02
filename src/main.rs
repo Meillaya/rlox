@@ -2,6 +2,8 @@ use std::env;
 use std::fs;
 use std::io::{self, Write};
 
+mod tokenizer;
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
