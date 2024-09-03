@@ -15,6 +15,12 @@ pub enum TokenType {
     RightParen,
     LeftBrace,
     RightBrace,
+    Star,
+    Comma,
+    Dot,
+    Plus,
+    Minus,
+    SemiColon,
     EOF,
     WhiteSpace,
 }
@@ -45,6 +51,12 @@ impl fmt:: Display for TokenType {
             TokenType:: RightParen => write!(f, "RIGHT_PAREN"),
             TokenType:: LeftBrace => write!(f, "LEFT_BRACE"),
             TokenType:: RightBrace => write!(f, "RIGHT_BRACE"),
+            TokenType:: Star => write!(f, "STAR"),
+            TokenType:: Comma => write!(f, "COMMA"),
+            TokenType:: Dot => write!(f, "DOT"),
+            TokenType:: Plus => write!(f, "Plus"),
+            TokenType:: Minus => write!(f, "Minus"),
+            TokenType:: SemiColon => write!(f, "SEMI_COLON"),
             TokenType:: EOF => write!(f, "EOF"),
             TokenType:: WhiteSpace => write!(f, "WHITESPACE"),
         }
@@ -83,6 +95,11 @@ impl<'a> Tokenizer<'a> {
             ')' => self.add_token(TokenType::RightParen),
             '{' => self.add_token(TokenType::LeftBrace),
             '}' => self.add_token(TokenType::RightBrace),
+            ',' => self.add_token(TokenType::Comma),
+            '.' => self.add_token(TokenType::Dot),
+            '-' => self.add_token(TokenType::Minus),
+            '+' => self.add_token(TokenType::Plus),
+            ';' => self.add_token(TokenType::SemiColon),
             // Add other cases here for different token types
             ' ' | '\r' | '\t' => (), // Ignore whitespace
             '\n' => self.line += 1,
