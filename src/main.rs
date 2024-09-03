@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 
 mod tokenizer;
-use tokenizer::{Tokenizer, Token};
+use tokenizer::{Tokenizer, Token, TokenType};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -32,10 +32,13 @@ fn main() {
                 let tokens = tokenizer.scan_tokens();
 
                 for token in tokens {
-                    println!("{:?}", token);
+                    if token.token_type != TokenType::WhiteSpace{
+                        println!("{}", token);
+                    }
+                    
 
                 }
-                
+                println!("EOF  null");
             } else {
                 println!("EOF  null");
             }
