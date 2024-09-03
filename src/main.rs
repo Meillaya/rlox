@@ -38,7 +38,6 @@ fn main() {
                     
 
                 }
-                println!("EOF  null");
             } else {
                 println!("EOF  null");
             }
