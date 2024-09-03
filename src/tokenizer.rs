@@ -56,7 +56,7 @@ impl fmt:: Display for TokenType {
             TokenType:: Dot => write!(f, "DOT"),
             TokenType:: Plus => write!(f, "PLUS"),
             TokenType:: Minus => write!(f, "MINUS"),
-            TokenType:: SemiColon => write!(f, "SEMI_COLON"),
+            TokenType:: SemiColon => write!(f, "SEMICOLON"),
             TokenType:: EOF => write!(f, "EOF"),
             TokenType:: WhiteSpace => write!(f, "WHITESPACE"),
         }
