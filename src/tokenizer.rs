@@ -13,6 +13,8 @@ pub struct Tokenizer <'a> {
 pub enum TokenType {
     LeftParen,
     RightParen,
+    LeftBrace,
+    RightBrace,
     EOF,
     WhiteSpace,
 }
@@ -41,6 +43,8 @@ impl fmt:: Display for TokenType {
         match self {
             TokenType:: LeftParen => write!(f, "LEFT_PAREN"),
             TokenType:: RightParen => write!(f, "RIGHT_PAREN"),
+            TokenType:: LeftBrace => write!(f, "LEFT_BRACE"),
+            TokenType:: RightBrace => write!(f, "RIGHT_BRACE"),
             TokenType:: EOF => write!(f, "EOF"),
             TokenType:: WhiteSpace => write!(f, "WHITESPACE"),
         }
@@ -77,6 +81,8 @@ impl<'a> Tokenizer<'a> {
         match c {
             '(' => self.add_token(TokenType::LeftParen),
             ')' => self.add_token(TokenType::RightParen),
+            '{' => self.add_token(TokenType::LeftBrace),
+            '}' => self.add_token(TokenType::RightBrace),
             // Add other cases here for different token types
             ' ' | '\r' | '\t' => (), // Ignore whitespace
             '\n' => self.line += 1,
