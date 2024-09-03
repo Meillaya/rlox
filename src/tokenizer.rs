@@ -41,7 +41,7 @@ impl fmt:: Display for TokenType {
         match self {
             TokenType:: LeftParen => write!(f, "LEFT_PAREN"),
             TokenType:: RightParen => write!(f, "RIGHT_PAREN"),
-            TokenType:: EOF => write!(f, "EOF_PAREN"),
+            TokenType:: EOF => write!(f, "EOF"),
             TokenType:: WhiteSpace => write!(f, "WHITESPACE"),
         }
         
