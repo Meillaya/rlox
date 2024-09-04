@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::io::{self, Write};
+use std::process;
 
 mod tokenizer;
 use tokenizer::{Tokenizer, Token, TokenType};
@@ -21,7 +22,7 @@ fn main() {
 
             let file_contents = fs::read_to_string(filename).unwrap_or_else(|_| {
                 writeln!(io::stderr(), "Failed to read file {}", filename).unwrap();
-                String::new()
+                process::exit(1);
             });
 
 
@@ -31,12 +32,20 @@ fn main() {
 
                 let tokens = tokenizer.scan_tokens();
 
+                
+              
+
                 for token in tokens {
+
                     if token.token_type != TokenType::WhiteSpace{
-                        println!("{}", token);
+                        println!("{} {} {}", token.token_type, token.lexeme, token.literal.as_deref().unwrap_or("null"));
                     }
                     
+                  
+                }
 
+                if tokenizer.has_error {
+                    std::process::exit(65);
                 }
             } else {
                 println!("EOF  null");
@@ -44,7 +53,7 @@ fn main() {
         }
         _ => {
             writeln!(io::stderr(), "Unknown command: {}", command).unwrap();
-            return;
+            process::exit(1);
         }
     }
 }

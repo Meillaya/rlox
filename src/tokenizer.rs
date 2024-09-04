@@ -1,5 +1,5 @@
-use std::str::Chars;
 use std::fmt;
+use std::io::{self, Write};
 
 pub struct Tokenizer <'a> {
     source: &'a str,
@@ -7,6 +7,8 @@ pub struct Tokenizer <'a> {
     start:usize,
     current: usize,
     line: usize,
+    errors: Vec<String>,
+    pub has_error: bool,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -71,8 +73,30 @@ impl<'a> Tokenizer<'a> {
             start: 0,
             current: 0,
             line: 1,
+            errors: Vec::new(),
+            has_error: false,
+
         }
     }
+
+
+    pub fn report_error(&mut self, unexpected_char: char) {
+
+        let error_msg = format! (
+
+            "[line {}] Error: Unexpected character: {}\n",
+            self.line,
+            unexpected_char,
+        );
+
+        eprint!("{}", error_msg);
+        // writeln!(io::stderr(), "{}", error_msg).unwrap();
+        self.has_error = true;
+
+
+
+    }
+
 
     pub fn scan_tokens(&mut self) -> Vec<Token> {
         while !self.is_at_end() {
@@ -85,6 +109,12 @@ impl<'a> Tokenizer<'a> {
             lexeme: String::from(""),
             literal: None,
         });
+        
+        // if self.has_error {
+        //     for error in &self.errors {
+        //         eprint!("{}", error);
+        //     }
+        // }
         self.tokens.clone()
     }
 
@@ -102,10 +132,13 @@ impl<'a> Tokenizer<'a> {
             '+' => self.add_token(TokenType::Plus),
             ';' => self.add_token(TokenType::SemiColon),
             // Add other cases here for different token types
-            ' ' | '\r' | '\t' => (), // Ignore whitespace
-            '\n' => self.line += 1,
+            ' ' | '\r' | '\t' => self.add_token(TokenType::WhiteSpace), // Ignore whitespace
+            '\n' => {
+                self.line += 1;
+                self.add_token(TokenType::WhiteSpace);
+            }
             _ => {
-                // Handle unknown characters or other token types
+                self.report_error(c);
             }
         }
     }
