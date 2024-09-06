@@ -23,6 +23,14 @@ pub enum TokenType {
     Plus,
     Minus,
     SemiColon,
+    Equal,
+    EqualEqual,
+    Bang,
+    BangEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
     EOF,
     WhiteSpace,
 }
@@ -59,6 +67,14 @@ impl fmt:: Display for TokenType {
             TokenType:: Plus => write!(f, "PLUS"),
             TokenType:: Minus => write!(f, "MINUS"),
             TokenType:: SemiColon => write!(f, "SEMICOLON"),
+            TokenType:: Equal => write!(f, "EQUAL"),
+            TokenType:: EqualEqual => write!(f, "EQUAL_EQUAL"),
+            TokenType:: Bang => write!(f, "BANG"),
+            TokenType:: BangEqual => write!(f, "BANG_EQUAL"),
+            TokenType:: Greater => write!(f, "GREATER"),
+            TokenType:: GreaterEqual => write!(f, "GREATER_EQUAL"),
+            TokenType:: Less => write!(f, "LESS"),
+            TokenType:: LessEqual => write!(f, "LESS_EQUAL"),
             TokenType:: EOF => write!(f, "EOF"),
             TokenType:: WhiteSpace => write!(f, "WHITESPACE"),
         }
@@ -131,7 +147,40 @@ impl<'a> Tokenizer<'a> {
             '-' => self.add_token(TokenType::Minus),
             '+' => self.add_token(TokenType::Plus),
             ';' => self.add_token(TokenType::SemiColon),
-            // Add other cases here for different token types
+            '!' => {
+                    if self.match_next('=') {
+                        self.add_token(TokenType::BangEqual)
+                    }
+                    else {
+                        self.add_token(TokenType::Bang)
+                    }
+                },
+            '=' => {
+                    if self.match_next('=') {
+                        self.add_token(TokenType::EqualEqual)
+                    }
+                    else {
+                        self.add_token(TokenType::Equal)
+                    }
+            },
+            '<' => {
+                if self.match_next('=') {
+                    self.add_token(TokenType::LessEqual)
+                }
+                else {
+                    self.add_token(TokenType::Less)
+                }
+
+            },
+            '>' => {
+                if self.match_next('=') {
+                    self.add_token(TokenType::GreaterEqual)
+                }
+                else {
+                    self.add_token(TokenType::Greater)
+                }
+
+            },
             ' ' | '\r' | '\t' => self.add_token(TokenType::WhiteSpace), // Ignore whitespace
             '\n' => {
                 self.line += 1;
@@ -141,6 +190,23 @@ impl<'a> Tokenizer<'a> {
                 self.report_error(c);
             }
         }
+    }
+
+    fn match_next(&mut self, expected: char) -> bool {
+
+        if self.is_at_end() {
+            return false;
+        }
+        if self.source.chars().nth(self.current).unwrap() != expected {
+
+            return false;
+        }
+
+        self.current += 1;
+        true
+        
+    
+
     }
 
     fn advance(&mut self) -> char {
