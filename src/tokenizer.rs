@@ -1,4 +1,7 @@
 use std::fmt;
+use lazy_static::lazy_static;
+use std::collections::HashMap;
+
 
 pub struct Tokenizer <'a> {
     source: &'a str,
@@ -32,6 +35,23 @@ pub enum TokenType {
     Slash,
     String,
     Number,
+    Identifier,
+    And,
+    Class,
+    Else,
+    False,
+    For,
+    Fun,
+    If,
+    Nil,
+    Or,
+    Print,
+    Return,
+    Super,
+    This,
+    True,
+    Var,
+    While,
     EOF,
     WhiteSpace,
 }
@@ -42,6 +62,33 @@ pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
     pub literal: Option<String>,
+    line: usize,
+}
+
+lazy_static! {
+
+    static ref KEYWORDS: HashMap<&'static str, TokenType> = {
+        let mut m = HashMap:: new();
+        m.insert("and", TokenType::And);
+        m.insert("class", TokenType::Class);
+        m.insert("else", TokenType::Else);
+        m.insert("false", TokenType::False);
+        m.insert("for", TokenType::For);
+        m.insert("fun", TokenType::Fun);
+        m.insert("if", TokenType::If);
+        m.insert("nil", TokenType::Nil);
+        m.insert("or", TokenType::Or);
+        m.insert("print", TokenType::Print);
+        m.insert("return", TokenType::Return);
+        m.insert("super", TokenType::Super);
+        m.insert("this", TokenType::This);
+        m.insert("true", TokenType::True);
+        m.insert("var", TokenType::Var);
+        m.insert("while", TokenType::While);
+        m.insert("_", TokenType::Identifier);
+        m
+
+    };
 }
 
 impl fmt::Display for Token {
@@ -79,8 +126,25 @@ impl fmt:: Display for TokenType {
             TokenType:: Slash => write!(f, "SLASH"),
             TokenType:: String => write!(f, "STRING"),
             TokenType:: Number => write!(f, "NUMBER"),
+            TokenType:: Identifier => write!(f, "IDENTIFIER"),
             TokenType:: EOF => write!(f, "EOF"),
             TokenType:: WhiteSpace => write!(f, "WHITESPACE"),
+            TokenType::And => write!(f, "AND"),
+            TokenType::Class => write!(f, "CLASS"),
+            TokenType::Else => write!(f, "ELSE"),
+            TokenType::False => write!(f, "FALSE"),
+            TokenType::For => write!(f, "FOR"),
+            TokenType::Fun => write!(f, "FUN"),
+            TokenType::If => write!(f, "IF"),
+            TokenType::Nil => write!(f, "NIL"),
+            TokenType::Or => write!(f, "OR"),
+            TokenType::Print => write!(f, "PRINT"),
+            TokenType::Return => write!(f, "RETURN"),
+            TokenType::Super => write!(f, "SUPER"),
+            TokenType::This => write!(f, "THIS"),
+            TokenType::True => write!(f, "TRUE"),
+            TokenType::Var => write!(f, "VAR"),
+            TokenType::While => write!(f, "WHILE"),
         }
         
     }
@@ -143,180 +207,195 @@ impl<'a> Tokenizer<'a> {
             token_type: TokenType::EOF,
             lexeme: String::from(""),
             literal: None,
+            line: self.line,
         });
         
         self.tokens.clone()
     }
 
-    fn scan_token(&mut self) {
-        let c = self.advance();
-        match c {
-            '(' => self.add_token(TokenType::LeftParen),
-            ')' => self.add_token(TokenType::RightParen),
-            '{' => self.add_token(TokenType::LeftBrace),
-            '}' => self.add_token(TokenType::RightBrace),
-            '*' => self.add_token(TokenType::Star),
-            ',' => self.add_token(TokenType::Comma),
-            '.' => self.add_token(TokenType::Dot),
-            '-' => self.add_token(TokenType::Minus),
-            '+' => self.add_token(TokenType::Plus),
-            ';' => self.add_token(TokenType::SemiColon),
-            '!' => {
-                    if self.match_next('=') {
-                        self.add_token(TokenType::BangEqual)
-                    }
-                    else {
-                        self.add_token(TokenType::Bang)
-                    }
-                },
-            '=' => {
-                    if self.match_next('=') {
-                        self.add_token(TokenType::EqualEqual)
-                    }
-                    else {
-                        self.add_token(TokenType::Equal)
-                    }
-            },
-            '<' => {
-                if self.match_next('=') {
-                    self.add_token(TokenType::LessEqual)
-                }
-                else {
-                    self.add_token(TokenType::Less)
-                }
-
-            },
-            '>' => {
-                if self.match_next('=') {
-                    self.add_token(TokenType::GreaterEqual)
-                }
-                else {
-                    self.add_token(TokenType::Greater)
-                }
-
-            },
-            '/' => {
-                if self.match_next('/') {
-
-                    while self.peek() != '\n' && !self.is_at_end() {
-
-                        self.advance();
-                    }
-                }
-                else {
-                    self.add_token(TokenType::Slash);
-                }
-                
-            },
-            '"' => {
-                self.string();
+fn scan_token(&mut self) {
+    let c = self.advance();
+    match c {
+        '(' => self.add_token(TokenType::LeftParen),
+        ')' => self.add_token(TokenType::RightParen),
+        '{' => self.add_token(TokenType::LeftBrace),
+        '}' => self.add_token(TokenType::RightBrace),
+        '*' => self.add_token(TokenType::Star),
+        ',' => self.add_token(TokenType::Comma),
+        '.' => self.add_token(TokenType::Dot),
+        '-' => self.add_token(TokenType::Minus),
+        '+' => self.add_token(TokenType::Plus),
+        ';' => self.add_token(TokenType::SemiColon),
+        '!' => {
+            if self.match_next('=') {
+                self.add_token(TokenType::BangEqual)
+            } else {
+                self.add_token(TokenType::Bang)
             }
-            ' ' | '\r' | '\t' => self.add_token(TokenType::WhiteSpace), // Ignore whitespace
-            '\n' => {
-                self.line += 1;
-                self.add_token(TokenType::WhiteSpace);
+        },
+        '=' => {
+            if self.match_next('=') {
+                self.add_token(TokenType::EqualEqual)
+            } else {
+                self.add_token(TokenType::Equal)
             }
-            _ => {
-
-                if self.is_digit(c) {
-
-                    self.is_number();
-                }
-                else {
-                    self.report_error(c);
-                }
-                
+        },
+        '<' => {
+            if self.match_next('=') {
+                self.add_token(TokenType::LessEqual)
+            } else {
+                self.add_token(TokenType::Less)
             }
+        },
+        '>' => {
+            if self.match_next('=') {
+                self.add_token(TokenType::GreaterEqual)
+            } else {
+                self.add_token(TokenType::Greater)
+            }
+        },
+        '/' => {
+            if self.match_next('/') {
+                while self.peek() != '\n' && !self.is_at_end() {
+                    self.advance();
+                }
+            } else {
+                self.add_token(TokenType::Slash);
+            }
+        },
+        '"' => {
+            self.string();
+        }
+        ' ' | '\r' | '\t' => {}, // Ignore whitespace
+        '\n' => {
+            self.line += 1;
+        },
+        _ => {
+
+            if c.is_ascii_digit() {
+                self.number();
+            }
+            else if self.is_alpha(c) {
+                self.identifier();
+            }
+            else{
+               self.report_error(c); 
+            }
+            
         }
     }
+}
 
+    fn identifier(&mut self) {
 
-    fn is_digit(&self, c: char) -> bool {
-
-        // c.is_ascii_digit()
-
-        return c >= '0' && c <= '9';
-    }
-
-    fn is_number(&mut self) {
-        
-        let start = self.current - 1;
-
-        let mut has_decimal = false;
-
+        while self.is_alpha_numeric(self.peek()) {
+            self.advance();
+        }
     
-        while self.is_digit(self.peek()) {
-            self.advance();
-        }
-        // Look for fractional part
-        if self.peek() == '.' && self.is_digit(self.peek_next()) {
-            has_decimal = true;
-            // Consume the "."
-            self.advance();
+        let text = &self.source[self.start..self.current];
+        let token_type = KEYWORDS.get(text).cloned().unwrap_or(TokenType::Identifier);
+        self.add_token(token_type);
+    }
+    
 
-            while self.is_digit(self.peek()) {
-                self.advance();
-            }
-        }
+    fn is_alpha(&self, c: char) -> bool {
 
-        let number_str = &self.source[self.start..self.current];
-
-        let number: f64 = number_str.parse().unwrap_or(0.0);
-
-        let formatted_number = if has_decimal {
-            number.to_string()
-        }
-        else {
-
-            format!("{}.0", number)
-        };
-
-
-        self.add_token_with_literal(TokenType::Number, Some(formatted_number.clone()));
-
+        c.is_ascii_alphabetic() || c == '_'
 
     }
+    
+    
+    fn is_alpha_numeric(&self, c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_'
+    }
 
-    fn string(&mut self){
-
-        let start_quote = self.current - 1;
+    fn string(&mut self) {
 
         while self.peek() != '"' && !self.is_at_end() {
 
             if self.peek() == '\n' {
 
                 self.line += 1;
+
             }
 
             self.advance();
+
         }
 
         if self.is_at_end() {
 
             self.report_error_string("".to_string());
+
+            self.has_error = true;
+
             return;
+
         }
 
+        // The closing ".
+
         self.advance();
-        
-        let string_content = &self.source[start_quote + 1..self.current - 1];
 
-        self.add_token_with_literal(TokenType:: String, Some(string_content.to_string()));
-      
+        // Trim the surrounding quotes.
 
+        let value = self.string_from_range(self.start + 1, self.current - 1);
+
+        self.add_token_with_literal(TokenType::String, Some(value));
 
     }
 
-    fn add_token_with_literal(&mut self, token_type: TokenType, literal: Option<String>){
+fn string_from_range(&self, start: usize, end: usize) -> String {
+    self.source.chars().skip(start).take(end - start).collect()
+}
+    fn number(&mut self) {
 
-        let text = &self.source[self.start..self.current];
+        while self.peek().is_ascii_digit() {
+
+            self.advance();
+
+        }
+
+        // Look for a fractional part.
+
+        if self.peek() == '.' && self.peek_next().is_ascii_digit() {
+
+            // Consume the "."
+
+            self.advance();
+
+            while self.peek().is_ascii_digit() {
+
+                self.advance();
+
+            }
+
+        }
+
+        let value: f64 = self.source[self.start..self.current].parse().unwrap_or(0.0);
+        self.add_token_with_literal(TokenType::Number, Some(format!("{:?}", value)));
+
+    }
+
+    
+    fn add_token_with_literal(&mut self, token_type: TokenType, literal: Option<String>) {
+
+        let lexeme = &self.source[self.start..self.current];
 
         self.tokens.push(Token {
+
             token_type,
-            lexeme: text.to_string(),
+
+            lexeme: lexeme.to_string(),
+
             literal,
+
+            line: self.line,
+
         })
+
     }
+    
 
  
     fn peek(&self) -> char{
@@ -328,12 +407,11 @@ impl<'a> Tokenizer<'a> {
 
         if self.current + 1 >= self.source.len() {
 
-            return '\0';
+            return '\0'
         }
 
-        return self.source.chars().nth(self.current + 1).unwrap_or('\0');
+        return self.source.chars().nth(self.current + 1).unwrap_or('\0')
     }
-
 
     fn match_next(&mut self, expected: char) -> bool {
 
@@ -364,6 +442,7 @@ impl<'a> Tokenizer<'a> {
             token_type,
             lexeme: text.to_string(),
             literal: None,
+            line: self.line,
         })
     }
 
