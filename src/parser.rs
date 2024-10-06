@@ -32,7 +32,59 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, String> {
-        self.unary()
+        self.equality()
+    }
+
+    fn equality(&mut self) -> Result<Expr, String> {
+        let mut expr = self.comparison()?;
+
+        while self.match_token(&[TokenType::EqualEqual, TokenType::BangEqual]) {
+            let operator = self.previous().clone();
+            let right = self.comparison()?;
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
+        }
+
+        Ok(expr)
+    }
+
+    fn comparison(&mut self) -> Result<Expr, String> {
+        let mut expr = self.addition()?;
+
+        while self.match_token(&[
+            TokenType::Greater,
+            TokenType::GreaterEqual,
+            TokenType::Less,
+            TokenType::LessEqual]) {
+            let operator = self.previous().clone();
+            let right = self.addition()?;
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
+        }
+
+        Ok(expr)
+    }
+
+    fn addition(&mut self) -> Result<Expr, String> {
+        let mut expr = self.multiplication()?;
+
+        while self.match_token(&[TokenType::Plus, TokenType::Minus]) {
+            let operator = self.previous().clone();
+            let right = self.multiplication()?;
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
+        }
+
+        Ok(expr)
+    }
+
+    fn multiplication(&mut self) -> Result<Expr, String> {
+        let mut expr = self.unary()?;
+
+        while self.match_token(&[TokenType::Star, TokenType::Slash]) {
+            let operator = self.previous().clone();
+            let right = self.unary()?;
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
+        }
+        
+        Ok(expr)
     }
 
     fn unary(&mut self) -> Result<Expr, String> {
@@ -135,6 +187,9 @@ pub fn print_ast(expr: &Expr) -> String {
         },
 
         Expr::Grouping(expr) => format!("(group {})", print_ast(expr)),
-        Expr::Unary(operator, expr) => format!("({} {}", operator.lexeme, print_ast(expr))
+        Expr::Unary(operator, expr) =>
+            format!("({} {})", operator.lexeme, print_ast(expr)),
+        Expr::Binary(left, operator, right) =>
+            format!("({} {} {})", operator.lexeme, print_ast(left), print_ast(right)),
     }
 }

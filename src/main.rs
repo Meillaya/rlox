@@ -80,6 +80,10 @@ fn main() {
                 println!("EOF");
             }
         },
+    "evaluate" => {
+        
+
+        },
         _ => {
             writeln!(io::stderr(), "Unknown command: {}", command).unwrap();
             process::exit(1);

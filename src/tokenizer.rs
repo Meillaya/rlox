@@ -62,7 +62,7 @@ pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
     pub literal: Option<String>,
-    line: usize,
+    pub line: usize,
 }
 
 lazy_static! {
