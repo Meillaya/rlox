@@ -4,7 +4,10 @@ use std::io::{self, Write};
 use std::process;
 
 mod tokenizer;
-use tokenizer::{Tokenizer, Token, TokenType};
+mod parser;
+
+use tokenizer::{Tokenizer, TokenType};
+use parser::{Parser, print_ast};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -50,7 +53,33 @@ fn main() {
             } else {
                 println!("EOF  null");
             }
-        }
+        },
+    "parse" => {
+            let file_contents = fs::read_to_string(filename).unwrap_or_else(|_| {
+                writeln!(io::stderr(), "Failed to read file {}", filename).unwrap();
+                process::exit(1);
+            });
+
+            if !file_contents.is_empty() {
+                let mut tokenizer = Tokenizer::new(&file_contents);
+                let tokens = tokenizer.scan_tokens();
+
+                if tokenizer.has_error {
+                    process::exit(65);
+                }
+
+                let mut parser = Parser::new(tokens);
+                match parser.parse() {
+                    Ok(expr) => println!("{}", print_ast(&expr)),
+                    Err(error) => {
+                        eprintln!("Error: {}", error);
+                        process::exit(65);
+                    }
+                }
+            } else {
+                println!("EOF");
+            }
+        },
         _ => {
             writeln!(io::stderr(), "Unknown command: {}", command).unwrap();
             process::exit(1);
