@@ -182,13 +182,7 @@ pub fn print_ast(expr: &Expr) -> String {
         Expr::Literal(value) => match value {
             LiteralValue::Nil => "nil".to_string(),
             LiteralValue::Boolean(b) => b.to_string(),
-            LiteralValue::Number(n) => {
-                if n.fract() == 0.0 {
-                    format!("{}", n.trunc())
-                } else {
-                    format!("{:?}", n)
-                }
-            },
+            LiteralValue::Number(n) => format!("{:?}", n),
             LiteralValue::String(s) => format!("{}", s),
         },
 
@@ -344,44 +338,44 @@ mod tests {
     }
 
 
-    // #[test]
-    // fn test_parse_extremely_complex_expression() {
-    //     let tokens = vec![
-    //         create_token(TokenType::LeftParen, "(", None),
-    //         create_token(TokenType::Number, "1", Some("1".to_string())),
-    //         create_token(TokenType::Plus, "+", None),
-    //         create_token(TokenType::LeftParen, "(", None),
-    //         create_token(TokenType::Number, "2", Some("2".to_string())),
-    //         create_token(TokenType::Star, "*", None),
-    //         create_token(TokenType::Number, "3", Some("3".to_string())),
-    //         create_token(TokenType::RightParen, ")", None),
-    //         create_token(TokenType::RightParen, ")", None),
-    //         create_token(TokenType::Slash, "/", None),
-    //         create_token(TokenType::LeftParen, "(", None),
-    //         create_token(TokenType::Number, "4", Some("4".to_string())),
-    //         create_token(TokenType::Minus, "-", None),
-    //         create_token(TokenType::LeftParen, "(", None),
-    //         create_token(TokenType::Number, "5", Some("5".to_string())),
-    //         create_token(TokenType::Plus, "+", None),
-    //         create_token(TokenType::Number, "6", Some("6".to_string())),
-    //         create_token(TokenType::RightParen, ")", None),
-    //         create_token(TokenType::RightParen, ")", None),
-    //         create_token(TokenType::Greater, ">", None),
-    //         create_token(TokenType::LeftParen, "(", None),
-    //         create_token(TokenType::True, "true", None),
-    //         create_token(TokenType::And, "and", None),
-    //         create_token(TokenType::LeftParen, "(", None),
-    //         create_token(TokenType::Number, "7", Some("7".to_string())),
-    //         create_token(TokenType::LessEqual, "<=", None),
-    //         create_token(TokenType::Number, "8", Some("8".to_string())),
-    //         create_token(TokenType::RightParen, ")", None),
-    //         create_token(TokenType::RightParen, ")", None),
-    //         create_token(TokenType::EOF, "", None),
-    //     ];
-    //     let mut parser = Parser::new(tokens);
-    //     let expr = parser.parse().unwrap();
-    //     assert_eq!(print_ast(&expr), "(> (/ (group (+ 1 (group (* 2 3)))) (group (- 4 (group (+ 5 6))))) (group (and true (group (<= 7 8)))))");
-    // }
+    #[test]
+    fn test_parse_extremely_complex_expression() {
+        let tokens = vec![
+            create_token(TokenType::LeftParen, "(", None),
+            create_token(TokenType::Number, "1", Some("1".to_string())),
+            create_token(TokenType::Plus, "+", None),
+            create_token(TokenType::LeftParen, "(", None),
+            create_token(TokenType::Number, "2", Some("2".to_string())),
+            create_token(TokenType::Star, "*", None),
+            create_token(TokenType::Number, "3", Some("3".to_string())),
+            create_token(TokenType::RightParen, ")", None),
+            create_token(TokenType::RightParen, ")", None),
+            create_token(TokenType::Slash, "/", None),
+            create_token(TokenType::LeftParen, "(", None),
+            create_token(TokenType::Number, "4", Some("4".to_string())),
+            create_token(TokenType::Minus, "-", None),
+            create_token(TokenType::LeftParen, "(", None),
+            create_token(TokenType::Number, "5", Some("5".to_string())),
+            create_token(TokenType::Plus, "+", None),
+            create_token(TokenType::Number, "6", Some("6".to_string())),
+            create_token(TokenType::RightParen, ")", None),
+            create_token(TokenType::RightParen, ")", None),
+            create_token(TokenType::Greater, ">", None),
+            create_token(TokenType::LeftParen, "(", None),
+            create_token(TokenType::True, "true", None),
+            create_token(TokenType::And, "and", None),
+            create_token(TokenType::LeftParen, "(", None),
+            create_token(TokenType::Number, "7", Some("7".to_string())),
+            create_token(TokenType::LessEqual, "<=", None),
+            create_token(TokenType::Number, "8", Some("8".to_string())),
+            create_token(TokenType::RightParen, ")", None),
+            create_token(TokenType::RightParen, ")", None),
+            create_token(TokenType::EOF, "", None),
+        ];
+        let mut parser = Parser::new(tokens);
+        let expr = parser.parse().unwrap();
+        assert_eq!(print_ast(&expr), "(> (/ (group (+ 1 (group (* 2 3)))) (group (- 4 (group (+ 5 6))))) (group (and true (group (<= 7 8)))))");
+    }
     
     
     

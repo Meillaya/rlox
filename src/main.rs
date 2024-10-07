@@ -99,8 +99,13 @@ fn main() {
                 let mut parser = Parser::new(tokens);
                 match parser.parse() {
                     Ok(expr) => {
-                        let result = evaluate(&expr);
-                        println!("{}", result);
+                        match evaluate(&expr) {
+                            Ok(result) => println!("{}", result),
+                            Err(runtime_error) => {
+                                eprintln!("{} [line {}]", runtime_error.message, runtime_error.line);
+                                process::exit(70);
+                            }
+                        }
                     },
                     Err(error) => {
                         eprintln!("Error: {}", error);
