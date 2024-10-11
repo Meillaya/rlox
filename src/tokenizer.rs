@@ -300,71 +300,53 @@ fn scan_token(&mut self) {
 
     fn is_alpha(&self, c: char) -> bool {
 
-        c.is_ascii_alphabetic() || c == '_'
+        c.is_alphabetic() || c == '_'
 
     }
     
     
     fn is_alpha_numeric(&self, c: char) -> bool {
-        c.is_ascii_alphanumeric() || c == '_'
+        c.is_alphanumeric() || c == '_'
     }
 
     fn string(&mut self) {
-
         while self.peek() != '"' && !self.is_at_end() {
-
             if self.peek() == '\n' {
-
                 self.line += 1;
-
             }
-
             self.advance();
-
         }
 
         if self.is_at_end() {
-
             self.report_error_string("".to_string());
-
-            self.has_error = true;
-
             return;
-
         }
 
-        // The closing ".
-
+        // Consume the closing quote
         self.advance();
 
-        // Trim the surrounding quotes.
-
-        let value = self.string_from_range(self.start + 1, self.current - 1);
-
-        self.add_token_with_literal(TokenType::String, Some(value));
-
+        // Extract the string literal using byte indices
+        let value = &self.source[self.start + 1..self.current - 1];
+        self.add_token_with_literal(TokenType::String, Some(value.to_string()));
     }
-
-fn string_from_range(&self, start: usize, end: usize) -> String {
-    self.source.chars().skip(start).take(end - start).collect()
-}
+    
+    
     fn number(&mut self) {
 
-        while self.peek().is_ascii_digit() {
+        while self.peek().is_digit(10) {
 
             self.advance();
-
         }
 
         // Look for a fractional part.
 
-        if self.peek() == '.' && self.peek_next().is_ascii_digit() {
+        if self.peek() == '.' && self.peek_next().is_digit(10) {
 
             // Consume the "."
 
             self.advance();
 
-            while self.peek().is_ascii_digit() {
+            while self.peek().is_digit(10) {
 
                 self.advance();
 
@@ -398,19 +380,17 @@ fn string_from_range(&self, start: usize, end: usize) -> String {
     
 
  
-    fn peek(&self) -> char{
-
-       self.source.chars().nth(self.current).unwrap_or('\0')
+    fn peek(&self) -> char {
+        self.source[self.current..]
+            .chars()
+            .next()
+            .unwrap_or('\0')
     }
 
-    pub fn peek_next(&self) -> char {
-
-        if self.current + 1 >= self.source.len() {
-
-            return '\0'
-        }
-
-        return self.source.chars().nth(self.current + 1).unwrap_or('\0')
+    fn peek_next(&self) -> char {
+        let mut iter = self.source[self.current..].chars();
+        iter.next();
+        iter.next().unwrap_or('\0')
     }
 
     fn match_next(&mut self, expected: char) -> bool {
@@ -431,10 +411,15 @@ fn string_from_range(&self, start: usize, end: usize) -> String {
     }
 
     fn advance(&mut self) -> char {
-        let current_char = self.source.chars().nth(self.current).unwrap_or('\0');
-        self.current += 1;
+        if self.is_at_end() {
+            return '\0';
+        }
+
+        let current_char = self.peek();
+        self.current += current_char.len_utf8();
         current_char
     }
+
 
     fn add_token(&mut self, token_type: TokenType) {
         let text = &self.source[self.start..self.current];

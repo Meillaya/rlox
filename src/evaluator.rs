@@ -136,8 +136,7 @@ pub fn execute_stmt(stmt: &Stmt) -> Result<(), RuntimeError> {
             Ok(())
         }
         Stmt::Expression(expr) => {
-            let value = evaluate(expr)?;
-            println!("{}", value);  // Add this line to print the result of expression statements
+            evaluate(expr)?;
             Ok(())
         }
     }
