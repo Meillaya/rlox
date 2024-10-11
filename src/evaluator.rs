@@ -1,4 +1,4 @@
-use crate::parser::{Expr, LiteralValue};
+use crate::parser::{Expr, LiteralValue, Stmt};
 use crate::tokenizer::TokenType;
 use std::fmt;
 
@@ -9,7 +9,7 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
-    fn new(message: String, line: usize) -> Self {
+    pub fn new(message: String, line: usize) -> Self {
         RuntimeError { message, line }
     }
 }
@@ -128,17 +128,29 @@ pub fn evaluate(expr: &Expr) -> Result<Value, RuntimeError> {
     }
 }
 
-
+pub fn execute_stmt(stmt: &Stmt) -> Result<(), RuntimeError> {
+    match stmt {
+        Stmt::Print(expr) => {
+            let value = evaluate(expr)?;
+            println!("{}", value);
+            Ok(())
+        }
+        Stmt::Expression(expr) => {
+            let value = evaluate(expr)?;
+            println!("{}", value);  // Add this line to print the result of expression statements
+            Ok(())
+        }
+    }
+}
 
 fn compare_equality(left: &Value, right: &Value) -> Result<Value, RuntimeError> {
     Ok(Value::Boolean(left == right))
 }
 
 fn compare_values(left: &Value, right: &Value, compare: fn(f64, f64) -> bool) -> Result<Value, RuntimeError> {
-    if is_number(left) && is_number(right) {
-        Ok(Value::Boolean(compare(get_number(left)?, get_number(right)?)))
-    } else {
-        Err(RuntimeError::new("Operands must be numbers.".to_string(), 0))
+    match (left, right) {
+        (Value::Number(l), Value::Number(r)) => Ok(Value::Boolean(compare(*l, *r))),
+        _ => Err(RuntimeError::new("Operands must be numbers.".to_string(), 0)),
     }
 }
 
