@@ -1,7 +1,9 @@
+use std::cell::RefCell;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::process;
+use std::rc::Rc;
 
 mod tokenizer;
 mod parser;
@@ -9,7 +11,7 @@ mod evaluator;
 
 use tokenizer::{Tokenizer, TokenType, Token};
 use parser::{Parser, print_ast};
-use evaluator::execute_stmt;
+use evaluator::{Environment,execute_stmt};
 
 fn read_and_tokenize(filename: &str) -> Result<Vec<Token>, String> {
     let file_contents = fs::read_to_string(filename).unwrap_or_else(|_| {
@@ -99,14 +101,44 @@ fn main() {
                 }
             }
         },
-    "evaluate" | "run" => {
+    "evaluate" => {
         match read_and_tokenize(filename) {
             Ok(tokens) => {
                 let mut parser = Parser::new(tokens);
                 match parser.parse() {
                     Ok(statements) => {
+                        let env = Rc::new(RefCell::new(Environment::new()));
                         for stmt in statements {
-                            match execute_stmt(&stmt) {
+                            match execute_stmt(&stmt, true, Rc::clone(&env)) {
+                                Ok(_) => {},
+                                Err(runtime_error) => {
+                                    eprintln!("{} [line {}]", runtime_error.message, runtime_error.line);
+                                    process::exit(70);
+                                }
+                            }
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("Error: {}", error);
+                        process::exit(65);
+                    }
+                }
+            },
+            Err(error) => {
+                eprintln!("Error: {}", error);
+                process::exit(65);
+            }
+        }
+    },
+    "run" => {
+        match read_and_tokenize(filename) {
+            Ok(tokens) => {
+                let mut parser = Parser::new(tokens);
+                match parser.parse() {
+                    Ok(statements) => {
+                        let env = Rc::new(RefCell::new(Environment::new()));
+                        for stmt in statements {
+                            match execute_stmt(&stmt, false, Rc::clone(&env)) {
                                 Ok(_) => {},
                                 Err(runtime_error) => {
                                     eprintln!("{} [line {}]", runtime_error.message, runtime_error.line);

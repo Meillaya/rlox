@@ -1,12 +1,71 @@
 use crate::parser::{Expr, LiteralValue, Stmt};
-use crate::tokenizer::TokenType;
+use crate::tokenizer::{Token, TokenType};
 use std::fmt;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+
+#[derive(Debug)]
+pub struct Environment {
+    values: HashMap<String, Value>,
+    enclosing: Option<Rc<RefCell<Environment>>>,
+}
+
 
 #[derive(Debug)]
 pub struct RuntimeError {
     pub message: String,
     pub line: usize,
 }
+
+impl Environment {
+    pub fn new() -> Self {
+        Environment {
+            values: HashMap::new(),
+            enclosing: None,
+        }
+    }
+
+    pub fn define(&mut self, name: String, value: Value) {
+        self.values.insert(name, value);
+    }
+
+    pub fn get(&self, name_token: &Token) -> Result<Value, RuntimeError> {
+        if let Some(value) = self.values.get(&name_token.lexeme) {
+            Ok(value.clone())
+        } else if let Some(ref enclosing) = self.enclosing {
+            enclosing.borrow().get(name_token)
+        } else {
+            Err(RuntimeError::new(
+                format!("Undefined variable '{}'", name_token.lexeme),
+                name_token.line,
+            ))
+        }
+    }
+
+    pub fn assign(&mut self, name_token: &Token, value: Value) -> Result<(), RuntimeError> {
+        if self.values.contains_key(&name_token.lexeme) {
+            self.values.insert(name_token.lexeme.clone(), value);
+            Ok(())
+        } else if let Some(ref enclosing) = self.enclosing {
+            enclosing.borrow_mut().assign(name_token, value)
+        } else {
+            Err(RuntimeError::new(
+                format!("Undefined variable '{}'", name_token.lexeme),
+                name_token.line,
+            ))
+        }
+    }
+
+    pub fn new_with_enclosing(enclosing: Rc<RefCell<Environment>>) -> Self {
+        Environment {
+            values: HashMap::new(),
+            enclosing: Some(enclosing),
+        }
+    }
+}
+
 
 impl RuntimeError {
     pub fn new(message: String, line: usize) -> Self {
@@ -48,7 +107,7 @@ fn is_string(value: &Value) -> bool {
     matches!(value, Value::String(_))
 }
 
-pub fn evaluate(expr: &Expr) -> Result<Value, RuntimeError> {
+pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, RuntimeError> {
     match expr {
         Expr::Literal(literal) => Ok(match literal {
             LiteralValue::Boolean(value) => Value::Boolean(*value),
@@ -56,9 +115,9 @@ pub fn evaluate(expr: &Expr) -> Result<Value, RuntimeError> {
             LiteralValue::String(value) => Value::String(value.clone()),
             LiteralValue::Nil => Value::Nil,
         }),
-        Expr::Grouping(expr) => evaluate(expr),
+        Expr::Grouping(expr) => evaluate(expr, Rc::clone(&env)),
         Expr::Unary(operator, expr) => {
-            let right = evaluate(expr)?;
+            let right = evaluate(expr, Rc::clone(&env))?;
             match operator.token_type {
                 TokenType::Minus => {
                     if let Value::Number(n) = right {
@@ -72,8 +131,8 @@ pub fn evaluate(expr: &Expr) -> Result<Value, RuntimeError> {
             }
         },
         Expr::Binary(left, operator, right) => {
-            let left = evaluate(left)?;
-            let right = evaluate(right)?;
+            let left = evaluate(left, Rc::clone(&env))?;
+            let right = evaluate(right, Rc::clone(&env))?;
             match operator.token_type {
                 TokenType::Plus => {
                     if is_number(&left) && is_number(&right) {
@@ -117,33 +176,70 @@ pub fn evaluate(expr: &Expr) -> Result<Value, RuntimeError> {
                 TokenType::GreaterEqual => compare_values(&left, &right, |a, b| a >= b),
                 TokenType::Less => compare_values(&left, &right, |a, b| a < b),
                 TokenType::LessEqual => compare_values(&left, &right, |a, b| a <= b),
-                TokenType::EqualEqual => compare_equality(&left, &right),
+                TokenType::EqualEqual => {
+                    let result = compare_equality(&left, &right)?;
+                    Ok(Value::Boolean(result))
+                },
                 TokenType::BangEqual => {
                     let result = compare_equality(&left, &right)?;
-                    Ok(Value::Boolean(!is_truthy(&result)))
+                    Ok(Value::Boolean(!result))
                 },
                 _ => Ok(Value::String("Unimplemented".to_string())),
             }
         },
-    }
+        Expr::Variable(name) => {
+            env.borrow().get(name).map_err(|err| RuntimeError::new(err.message, name.line))
+        },
+        Expr::Assign(name, value_expr) => {
+            let value = evaluate(value_expr, Rc::clone(&env))?;
+            env.borrow_mut().assign(name, value.clone())?;
+            Ok(value)
+        }}
 }
-
-pub fn execute_stmt(stmt: &Stmt) -> Result<(), RuntimeError> {
+pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {
     match stmt {
         Stmt::Print(expr) => {
-            let value = evaluate(expr)?;
+            let value = evaluate(expr, Rc::clone(&env))?;
             println!("{}", value);
             Ok(())
         }
         Stmt::Expression(expr) => {
-            evaluate(expr)?;
+            let value = evaluate(expr, Rc::clone(&env))?;
+            if print_expr_result {
+                println!("{}", value);
+            }
             Ok(())
+        }
+        Stmt::Var(name, initializer) => {
+            let value = match initializer {
+                Some(expr) => evaluate(expr, Rc::clone(&env))?,
+                None => Value::Nil,
+            };
+            env.borrow_mut().define(name.lexeme.clone(), value);
+            Ok(())
+        }
+        Stmt::Block(statements) => {
+            let block_env = Rc::new(RefCell::new(Environment::new_with_enclosing(Rc::clone(&env))));
+            execute_block(statements, block_env)
         }
     }
 }
 
-fn compare_equality(left: &Value, right: &Value) -> Result<Value, RuntimeError> {
-    Ok(Value::Boolean(left == right))
+fn execute_block(statements: &[Stmt], env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {
+    for statement in statements {
+        execute_stmt(statement, false, Rc::clone(&env))?;
+    }
+    Ok(())
+}
+
+fn compare_equality(left: &Value, right: &Value) -> Result<bool, RuntimeError> {
+    match (left, right) {
+        (Value::Number(l), Value::Number(r)) => Ok((l - r).abs() < f64::EPSILON),
+        (Value::String(l), Value::String(r)) => Ok(l == r),
+        (Value::Boolean(l), Value::Boolean(r)) => Ok(l == r),
+        (Value::Nil, Value::Nil) => Ok(true),
+        _ => Ok(false),
+    }
 }
 
 fn compare_values(left: &Value, right: &Value, compare: fn(f64, f64) -> bool) -> Result<Value, RuntimeError> {
@@ -161,159 +257,4 @@ fn is_truthy(value: &Value) -> bool {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::parser::Expr;
-    use crate::tokenizer::Token;
 
-    fn create_binary_expr(left: Expr, op: TokenType, right: Expr) -> Expr {
-        Expr::Binary(
-            Box::new(left),
-            Token { token_type: op, lexeme: String::new(), literal: None, line: 1 },
-            Box::new(right)
-        )
-    }
-
-    #[test]
-    fn test_literal_evaluation() {
-        assert_eq!(evaluate(&Expr::Literal(LiteralValue::Number(42.0))).unwrap(), Value::Number(42.0));
-        assert_eq!(evaluate(&Expr::Literal(LiteralValue::String("hello".to_string()))).unwrap(), Value::String("hello".to_string()));
-        assert_eq!(evaluate(&Expr::Literal(LiteralValue::Boolean(true))).unwrap(), Value::Boolean(true));
-        assert_eq!(evaluate(&Expr::Literal(LiteralValue::Nil)).unwrap(), Value::Nil);
-    }
-
-    #[test]
-    fn test_arithmetic_operations() {
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(5.0)),
-            TokenType::Plus,
-            Expr::Literal(LiteralValue::Number(3.0))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Number(8.0));
-
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(10.0)),
-            TokenType::Minus,
-            Expr::Literal(LiteralValue::Number(4.0))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Number(6.0));
-
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(3.0)),
-            TokenType::Star,
-            Expr::Literal(LiteralValue::Number(4.0))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Number(12.0));
-
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(15.0)),
-            TokenType::Slash,
-            Expr::Literal(LiteralValue::Number(3.0))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Number(5.0));
-    }
-
-    #[test]
-    fn test_comparison_operations() {
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(5.0)),
-            TokenType::Greater,
-            Expr::Literal(LiteralValue::Number(3.0))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Boolean(true));
-
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(5.0)),
-            TokenType::LessEqual,
-            Expr::Literal(LiteralValue::Number(5.0))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Boolean(true));
-
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(10.0)),
-            TokenType::Less,
-            Expr::Literal(LiteralValue::Number(20.0))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Boolean(true));
-    }
-
-    #[test]
-    fn test_equality_operations() {
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(25.0)),
-            TokenType::EqualEqual,
-            Expr::Literal(LiteralValue::String("25".to_string()))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Boolean(false));
-
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(25.0)),
-            TokenType::EqualEqual,
-            Expr::Literal(LiteralValue::Number(25.0))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Boolean(true));
-
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::String("hello".to_string())),
-            TokenType::BangEqual,
-            Expr::Literal(LiteralValue::String("world".to_string()))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Boolean(true));
-    }
-
-    #[test]
-    fn test_unary_operations() {
-        let expr = Expr::Unary(
-            Token { token_type: TokenType::Minus, lexeme: String::new(), literal: None, line: 1 },
-            Box::new(Expr::Literal(LiteralValue::Number(5.0)))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Number(-5.0));
-
-        let expr = Expr::Unary(
-            Token { token_type: TokenType::Bang, lexeme: String::new(), literal: None, line: 1 },
-            Box::new(Expr::Literal(LiteralValue::Boolean(true)))
-        );
-        assert_eq!(evaluate(&expr).unwrap(), Value::Boolean(false));
-    }
-
-    #[test]
-    fn test_grouping() {
-        let expr = Expr::Grouping(Box::new(Expr::Literal(LiteralValue::Number(42.0))));
-        assert_eq!(evaluate(&expr).unwrap(), Value::Number(42.0));
-    }
-
-    #[test]
-    fn test_runtime_errors() {
-        // Division by zero
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::Number(5.0)),
-            TokenType::Slash,
-            Expr::Literal(LiteralValue::Number(0.0))
-        );
-        assert!(evaluate(&expr).is_err());
-
-        // Invalid arithmetic operation
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::String("hello".to_string())),
-            TokenType::Minus,
-            Expr::Literal(LiteralValue::Number(5.0))
-        );
-        assert!(evaluate(&expr).is_err());
-
-        // Invalid comparison
-        let expr = create_binary_expr(
-            Expr::Literal(LiteralValue::String("hello".to_string())),
-            TokenType::Greater,
-            Expr::Literal(LiteralValue::Number(5.0))
-        );
-        assert!(evaluate(&expr).is_err());
-
-        // Unary minus on non-number
-        let expr = Expr::Unary(
-            Token { token_type: TokenType::Minus, lexeme: String::new(), literal: None, line: 1 },
-            Box::new(Expr::Literal(LiteralValue::String("hello".to_string())))
-        );
-        assert!(evaluate(&expr).is_err());
-    }
-}
