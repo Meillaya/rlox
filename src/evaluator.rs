@@ -184,6 +184,14 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, Run
                     let result = compare_equality(&left, &right)?;
                     Ok(Value::Boolean(!result))
                 },
+                TokenType::Or => {
+                    let left_val = evaluate(left, Rc::clone(&env))?;
+                    if is_truthy(&left_val) {
+                        Ok(left_val) 
+                    } else {
+                        evaluate(right, Rc::clone(&env))
+                    }
+                }
                 _ => Ok(Value::String("Unimplemented".to_string())),
             }
         },
@@ -194,10 +202,9 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, Run
             let value = evaluate(value_expr, Rc::clone(&env))?;
             env.borrow_mut().assign(name, value.clone())?;
             Ok(value)
-        }}
-}
-pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {
-    match stmt {
+        }
+    }
+}pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {    match stmt {
         Stmt::Print(expr) => {
             let value = evaluate(expr, Rc::clone(&env))?;
             println!("{}", value);
@@ -221,7 +228,16 @@ pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Enviro
         Stmt::Block(statements) => {
             let block_env = Rc::new(RefCell::new(Environment::new_with_enclosing(Rc::clone(&env))));
             execute_block(statements, block_env)
-        }
+        },
+        Stmt::If(condition, then_branch, else_branch) => {
+            let condition_value = evaluate(condition, Rc::clone(&env))?;
+            if is_truthy(&condition_value) {
+                execute_stmt(then_branch, print_expr_result, Rc::clone(&env))?;
+            } else if let Some(else_stmt) = else_branch {
+                execute_stmt(else_stmt, print_expr_result, Rc::clone(&env))?;
+            }
+            Ok(())
+        },
     }
 }
 

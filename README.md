@@ -1,34 +1,117 @@
-[![progress-banner](https://backend.codecrafters.io/progress/interpreter/aefb5e47-0051-4a9b-8bbf-17ab0d4502ab)](https://app.codecrafters.io/users/Meillaya?r=2qF)
+# Rust Interpreter Implementation
 
-This is a starting point for Rust solutions to the
-["Build Your Own Build your own Interpreter" Challenge](https://app.codecrafters.io/courses/interpreter/overview).
+A robust interpreter implementation in Rust that supports expression evaluation, variable management, and control flow statements.
 
-_Add a description of your course here_
+## Features
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+- **Expression Evaluation**
+  - Arithmetic operations (+, -, *, /)
+  - String concatenation
+  - Comparison operators (<, >, <=, >=, ==, !=)
+  - Logical operators (!, or)
+  - Grouping expressions with parentheses
 
-# Passing the first stage
+- **Variable Management**
+  - Variable declaration and initialization
+  - Variable assignment
+  - Scoped variables with block support
+  - Lexical scoping
 
-The entry point for your `<fill_in_executable_name>` implementation is in
-`src/main.rs`. Study and uncomment the relevant code, and push your changes to
-pass the first stage:
+- **Control Flow**
+  - If-else statements
+  - Block statements with local scope
+  - Print statements
 
-```sh
-git add .
-git commit -m "pass 1st stage" # any msg
-git push origin master
+- **Type System**
+  - Numbers (64-bit floating point)
+  - Strings
+  - Booleans
+  - Nil values
+
+## Setup
+
+
+1. Ensure you have Rust 1.77 or later installed
+2. Clone the repository
+3. Build the project:
+
+
+```
+cargo build --release
 ```
 
-Time to move on to the next stage!
+## Usage Examples
 
-# Stage 2 & beyond
+### Basic Arithmetic
 
-Note: This section is for stages 2 and beyond.
+// Addition and multiplication
+```print 2 + 3 * 4;  // Outputs: 14```
 
-1. Ensure you have `cargo (1.77)` installed locally
-1. Run `./<fill_in_script_name>.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+// String concatenation
+```print "Hello " + "World";  // Outputs: Hello World```
+
+
+### Variables
+
+```
+var x = 10;
+var y = 20;
+print x + y;  // Outputs: 30
+
+// Variable scoping
+{
+    var x = 5;
+    print x;  // Outputs: 5
+}
+print x;  // Outputs: 10
+```
+
+
+### Control Flow
+
+```
+var condition = true;
+if (condition) {
+    print "Condition is true";
+} else {
+    print "Condition is false";
+}
+
+// Logical operators
+if (true or false) {
+    print "At least one is true";
+}
+```
+
+## Error Handling
+
+The interpreter provides clear error messages for common issues:
+
+- Division by zero
+- Undefined variables
+- Type mismatches
+- Invalid operations
+
+## Running the Interpreter
+
+Use the provided script to run your program:
+
+
+```./your_program.sh <command> <filename>```
+
+
+Available commands:
+
+- tokenize: Display tokens from source file
+- parse: Show AST representation
+- evaluate: Execute and show expression results
+- run: Execute the program
+
+## Development
+
+The interpreter is built with a clear separation of concerns:
+
+- Tokenizer: Lexical analysis
+- Parser: Syntax analysis and AST construction
+- Evaluator: Expression evaluation and statement execution
+- Environment: Variable and scope management

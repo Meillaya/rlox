@@ -6,6 +6,7 @@ pub enum Stmt {
     Print(Expr),
     Var(Token, Option<Expr>),
     Block(Vec<Stmt>),
+    If(Expr, Box<Stmt>, Option<Box<Stmt>>),
 }
 
 #[derive(Debug)]
@@ -77,17 +78,34 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
-        if self.match_token(&[TokenType::LeftBrace]) {
+        if self.match_token(&[TokenType::If]) {
+            self.parse_if_statement()
+        } else if self.match_token(&[TokenType::LeftBrace]) {
             Ok(Stmt::Block(self.block()?))
         } else if self.match_token(&[TokenType::Var]) {
             self.var_declaration()
         } else if self.match_token(&[TokenType::Print]) {
             self.parse_print()
         } else {
-            self.expression_stmt() 
+            self.expression_stmt()
         }
     }
     
+    fn parse_if_statement(&mut self) -> Result<Stmt, String> {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.")?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RightParen, "Expect ')' after if condition.")?;
+
+        let then_branch = Box::new(self.parse_stmt()?);
+        let else_branch = if self.match_token(&[TokenType::Else]) {
+            Some(Box::new(self.parse_stmt()?))
+        } else {
+            None
+        };
+
+        Ok(Stmt::If(condition, then_branch, else_branch))
+    }
+
 
     fn parse_print(&mut self) -> Result<Stmt, String> {
         let value = self.expression()?;
@@ -105,24 +123,40 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, String> {
-        self.assignment()
+        self.assignment() 
     }
-
+    
     fn assignment(&mut self) -> Result<Expr, String> {
-        let expr = self.equality()?;
+        let expr = self.or()?; 
         
         if self.match_token(&[TokenType::Equal]) {
             let equals = self.previous().clone();
             let value = self.assignment()?;
-
+    
             if let Expr::Variable(name) = expr {
                 return Ok(Expr::Assign(name, Box::new(value)));
             }
-
+    
             return Err(format!("Invalid assignment target: {}", equals.line));
         }
-
+    
         Ok(expr)
+    }
+    
+    fn or(&mut self) -> Result<Expr, String> {
+        let mut expr = self.and()?;
+    
+        while self.match_token(&[TokenType::Or]) {
+            let operator = self.previous().clone();
+            let right = self.and()?;
+            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
+        }
+    
+        Ok(expr)
+    }
+    
+    fn and(&mut self) -> Result<Expr, String> {
+        self.equality()
     }
 
     fn equality(&mut self) -> Result<Expr, String> {
