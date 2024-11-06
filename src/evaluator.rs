@@ -184,14 +184,6 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, Run
                     let result = compare_equality(&left, &right)?;
                     Ok(Value::Boolean(!result))
                 },
-                TokenType::Or => {
-                    let left_val = evaluate(left, Rc::clone(&env))?;
-                    if is_truthy(&left_val) {
-                        Ok(left_val) 
-                    } else {
-                        evaluate(right, Rc::clone(&env))
-                    }
-                }
                 _ => Ok(Value::String("Unimplemented".to_string())),
             }
         },
@@ -202,8 +194,24 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, Run
             let value = evaluate(value_expr, Rc::clone(&env))?;
             env.borrow_mut().assign(name, value.clone())?;
             Ok(value)
-        }
+        },
+        Expr::Logical(left, operator, right) => {
+            let left_val = evaluate(left, Rc::clone(&env))?;
+            
+            if operator.token_type == TokenType::Or {
+                if is_truthy(&left_val) {
+                    return Ok(left_val);
+                }
+            } else if operator.token_type == TokenType::And {
+                if !is_truthy(&left_val) {
+                    return Ok(left_val);
+                }
+            }
+            
+            evaluate(right, Rc::clone(&env))
+        },
     }
+    
 }pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {    match stmt {
         Stmt::Print(expr) => {
             let value = evaluate(expr, Rc::clone(&env))?;
@@ -235,6 +243,12 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, Run
                 execute_stmt(then_branch, print_expr_result, Rc::clone(&env))?;
             } else if let Some(else_stmt) = else_branch {
                 execute_stmt(else_stmt, print_expr_result, Rc::clone(&env))?;
+            }
+            Ok(())
+        },
+        Stmt::While(condition, body) => {
+            while is_truthy(&evaluate(condition, Rc::clone(&env))?) {
+                execute_stmt(body, print_expr_result, Rc::clone(&env))?;
             }
             Ok(())
         },

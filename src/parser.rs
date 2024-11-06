@@ -7,6 +7,7 @@ pub enum Stmt {
     Var(Token, Option<Expr>),
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
+    While(Expr, Box<Stmt>),
 }
 
 #[derive(Debug)]
@@ -17,6 +18,7 @@ pub enum Expr {
     Binary(Box<Expr>, Token, Box<Expr>),
     Variable(Token),
     Assign(Token, Box<Expr>),
+    Logical(Box<Expr>, Token, Box<Expr>),
 }
 
 #[derive(Debug)]
@@ -78,7 +80,68 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
-        if self.match_token(&[TokenType::If]) {
+        if self.match_token(&[TokenType::For]) {
+            // Parse for statement
+            self.consume(TokenType::LeftParen, "Expect '(' after 'for'.")?;
+        
+            // Initializer
+            let initializer = if self.match_token(&[TokenType::SemiColon]) {
+                None
+            } else if self.match_token(&[TokenType::Var]) {
+                let name = self.consume(TokenType::Identifier, "Expect variable name.")?.clone();
+                let initializer = if self.match_token(&[TokenType::Equal]) {
+                    Some(self.expression()?)
+                } else {
+                    None
+                };
+                self.consume(TokenType::SemiColon, "Expect ';' after variable declaration.")?;
+                Some(Stmt::Var(name, initializer))
+            } else {
+                let expr = self.expression()?;
+                self.consume(TokenType::SemiColon, "Expect ';' after expression.")?;
+                Some(Stmt::Expression(expr))
+            };
+
+            // Condition
+            let condition = if !self.check(TokenType::SemiColon) {
+                Some(self.expression()?)
+            } else {
+                None
+            };
+            self.consume(TokenType::SemiColon, "Expect ';' after loop condition.")?;
+
+            // Increment
+            let increment = if !self.check(TokenType::RightParen) {
+                Some(self.expression()?)
+            } else {
+                None
+            };
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.")?;
+
+            // Body
+            let mut body = self.parse_stmt()?;
+
+            // Build the desugared AST
+            if let Some(increment) = increment {
+                body = Stmt::Block(vec![body, Stmt::Expression(increment)]);
+            }
+
+            let condition = condition.unwrap_or(Expr::Literal(LiteralValue::Boolean(true)));
+            body = Stmt::While(condition, Box::new(body));
+
+            if let Some(initializer) = initializer {
+                body = Stmt::Block(vec![initializer, body]);
+            }
+
+            Ok(body)
+        }
+        else if self.match_token(&[TokenType::While]) {
+            self.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
+            let condition = self.expression()?;
+            self.consume(TokenType::RightParen, "Expect ')' after condition.")?;
+            let body = Box::new(self.parse_stmt()?);
+            Ok(Stmt::While(condition, body))
+        } else if self.match_token(&[TokenType::If]) {
             self.parse_if_statement()
         } else if self.match_token(&[TokenType::LeftBrace]) {
             Ok(Stmt::Block(self.block()?))
@@ -89,8 +152,7 @@ impl Parser {
         } else {
             self.expression_stmt()
         }
-    }
-    
+    }    
     fn parse_if_statement(&mut self) -> Result<Stmt, String> {
         self.consume(TokenType::LeftParen, "Expect '(' after 'if'.")?;
         let condition = self.expression()?;
@@ -123,12 +185,13 @@ impl Parser {
     }
 
     fn expression(&mut self) -> Result<Expr, String> {
-        self.assignment() 
+        self.assignment()
     }
     
+    
     fn assignment(&mut self) -> Result<Expr, String> {
-        let expr = self.or()?; 
-        
+        let expr = self.or()?;
+    
         if self.match_token(&[TokenType::Equal]) {
             let equals = self.previous().clone();
             let value = self.assignment()?;
@@ -137,7 +200,7 @@ impl Parser {
                 return Ok(Expr::Assign(name, Box::new(value)));
             }
     
-            return Err(format!("Invalid assignment target: {}", equals.line));
+            return Err(format!("Invalid assignment target at line {}", equals.line));
         }
     
         Ok(expr)
@@ -145,18 +208,26 @@ impl Parser {
     
     fn or(&mut self) -> Result<Expr, String> {
         let mut expr = self.and()?;
-    
+
         while self.match_token(&[TokenType::Or]) {
             let operator = self.previous().clone();
             let right = self.and()?;
-            expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
+            expr = Expr::Logical(Box::new(expr), operator, Box::new(right));
         }
-    
+
         Ok(expr)
     }
     
     fn and(&mut self) -> Result<Expr, String> {
-        self.equality()
+        let mut expr = self.equality()?;
+
+        while self.match_token(&[TokenType::And]) {
+            let operator = self.previous().clone();
+            let right = self.equality()?;
+            expr = Expr::Logical(Box::new(expr), operator, Box::new(right));
+        }
+
+        Ok(expr)
     }
 
     fn equality(&mut self) -> Result<Expr, String> {
@@ -320,5 +391,6 @@ pub fn print_ast(expr: &Expr) -> String {
             format!("({} {} {})", operator.lexeme, print_ast(left), print_ast(right)),
         Expr::Variable(token) => token.lexeme.clone(),
         Expr::Assign(token, expr) => format!("({} = {})", token.lexeme, print_ast(expr)),
+        Expr::Logical(expr, token, expr1) => format!("({} {} {})", print_ast(expr), token.lexeme, print_ast(expr1)),
     }
 }
