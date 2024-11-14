@@ -13,6 +13,7 @@ pub struct Environment {
 }
 
 
+
 #[derive(Debug)]
 pub struct RuntimeError {
     pub message: String,
@@ -64,6 +65,15 @@ impl Environment {
             enclosing: Some(enclosing),
         }
     }
+
+    pub fn define_natives(&mut self) {
+        self.define("clock".to_string(), Value::NativeFunction(|| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap();
+            Value::Number(now.as_secs_f64())
+        }));
+    }
 }
 
 
@@ -79,6 +89,7 @@ pub enum Value {
     String(String),
     Boolean(bool),
     Nil,
+    NativeFunction(fn() -> Value),
 }
 
 impl fmt::Display for Value {
@@ -88,6 +99,7 @@ impl fmt::Display for Value {
             Value::String(s) => write!(f, "{}", s),
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
+            Value::NativeFunction(_) => write!(f, "<native fn>"),
         }
     }
 }
@@ -210,9 +222,30 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, Run
             
             evaluate(right, Rc::clone(&env))
         },
+        Expr::Call(callee, _paren, arguments) => {
+            let callee_val = evaluate(callee, Rc::clone(&env))?;
+            
+            match callee_val {
+                Value::NativeFunction(func) => {
+                    if arguments.len() != 0 {
+                        return Err(RuntimeError::new(
+                            "Native function 'clock' expects 0 arguments.".to_string(),
+                            0,
+                        ));
+                    }
+                    Ok(func())
+                }
+                _ => Err(RuntimeError::new(
+                    "Can only call functions.".to_string(),
+                    0,
+                )),
+            }
+        }
     }
     
-}pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {    match stmt {
+}
+
+pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {    match stmt {
         Stmt::Print(expr) => {
             let value = evaluate(expr, Rc::clone(&env))?;
             println!("{}", value);
