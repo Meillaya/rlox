@@ -1,6 +1,6 @@
 use crate::tokenizer::{Token, TokenType};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone )]
 pub enum Stmt {
     Expression(Expr),
     Print(Expr),
@@ -8,9 +8,11 @@ pub enum Stmt {
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
     While(Expr, Box<Stmt>),
+    Function(Token, Vec<Token>, Vec<Stmt>),
+    Return(Token, Option<Expr>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Literal(LiteralValue),
     Grouping(Box<Expr>),
@@ -22,7 +24,7 @@ pub enum Expr {
     Call(Box<Expr>, Token, Vec<Expr>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum LiteralValue {
     String(String),
     Number(f64),
@@ -51,6 +53,30 @@ impl std::error::Error for ParseError {}
 
 impl Parser {
 
+    fn call(&mut self, expr: Expr) -> Result<Expr, String> {
+        let mut expr = expr;
+        loop {
+            if self.match_token(&[TokenType::LeftParen]) {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn return_statement(&mut self) -> Result<Stmt, String> {
+        let keyword = self.previous().clone();
+        let value = if !self.check(TokenType::SemiColon) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::SemiColon, "Expect ';' after return value.")?;
+        Ok(Stmt::Return(keyword, value))
+    }
+
     fn block(&mut self) -> Result<Vec<Stmt>, String> {
 
         let mut statements = Vec::new();
@@ -61,6 +87,27 @@ impl Parser {
 
         self.consume(TokenType::RightBrace, "Expect '}' after block.")?;
         Ok(statements)
+    }
+
+    fn function(&mut self, kind: &str) -> Result<Stmt, String> {
+        let name = self.consume(TokenType::Identifier, &format!("Expect {} name.", kind))?.clone();
+        self.consume(TokenType::LeftParen, &format!("Expect '(' after {} name.", kind))?;
+        
+        let mut parameters = Vec::new();
+        if !self.check(TokenType::RightParen) {
+            loop {
+                parameters.push(self.consume(TokenType::Identifier, "Expect parameter name.")?.clone());
+                if !self.match_token(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+        
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.")?;
+        self.consume(TokenType::LeftBrace, &format!("Expect '{{' before {} body.", kind))?;
+        let body = self.block()?;
+        
+        Ok(Stmt::Function(name, parameters, body))
     }
 
     fn var_declaration(&mut self) -> Result<Stmt, String> {
@@ -95,6 +142,12 @@ impl Parser {
     }
     
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
+        if self.match_token(&[TokenType::Return]) {
+            return self.return_statement();
+        }
+        if self.match_token(&[TokenType::Fun]) {
+            return self.function("function");
+        }
         if self.match_token(&[TokenType::For]) {
             return self.for_statement();
         }
@@ -317,25 +370,22 @@ impl Parser {
     }
 
     fn primary(&mut self) -> Result<Expr, String> {
-        if self.match_token(&[TokenType::LeftParen]) {
+        let expr = if self.match_token(&[TokenType::LeftParen]) {
             let expr = self.expression()?;
             self.consume(TokenType::RightParen, "Expected ')' after expression")?;
-            Ok(Expr::Grouping(Box::new(expr)))
+            Expr::Grouping(Box::new(expr))
         } else if self.match_token(&[TokenType::Identifier]) {
-            let expr = Expr::Variable(self.previous().clone());
-            if self.match_token(&[TokenType::LeftParen]) {
-                self.finish_call(expr)
-            } else {
-                Ok(expr)
-            }
+            Expr::Variable(self.previous().clone())
         } else {
-            self.literal()
-        }
+            self.literal()?
+        };
+    
+        self.call(expr)
     }
 
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, String> {
         let mut arguments = Vec::new();
-
+    
         if !self.check(TokenType::RightParen) {
             loop {
                 arguments.push(self.expression()?);
@@ -344,9 +394,8 @@ impl Parser {
                 }
             }
         }
-
+    
         let paren = self.consume(TokenType::RightParen, "Expect ')' after arguments.")?;
-
         Ok(Expr::Call(Box::new(callee), paren.clone(), arguments))
     }
 

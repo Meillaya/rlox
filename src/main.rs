@@ -9,6 +9,7 @@ mod tokenizer;
 mod parser;
 mod evaluator;
 
+use evaluator::RuntimeError;
 use tokenizer::{Tokenizer, TokenType, Token};
 use parser::{Parser, print_ast};
 use evaluator::{Environment,execute_stmt};
@@ -113,8 +114,16 @@ fn main() {
                                 match execute_stmt(&stmt, true, Rc::clone(&env)) {
                                     Ok(_) => {},
                                     Err(runtime_error) => {
-                                        eprintln!("{} [line {}]", runtime_error.message, runtime_error.line);
-                                        process::exit(70);
+                                        match runtime_error {
+                                            RuntimeError::Error { message, line } => {
+                                                eprintln!("{} [line {}]", message, line);
+                                                process::exit(70);
+                                            },
+                                            RuntimeError::Return(_) => {
+                                                // Return statements should be handled within function calls
+                                                process::exit(70);
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -143,8 +152,16 @@ fn main() {
                                 match execute_stmt(&stmt, false, Rc::clone(&env)) {
                                     Ok(_) => {},
                                     Err(runtime_error) => {
-                                        eprintln!("{} [line {}]", runtime_error.message, runtime_error.line);
-                                        process::exit(70);
+                                        match runtime_error {
+                                            RuntimeError::Error { message, line } => {
+                                                eprintln!("{} [line {}]", message, line);
+                                                process::exit(70);
+                                            },
+                                            RuntimeError::Return(_) => {
+                                                // Return statements should be handled within function calls
+                                                process::exit(70);
+                                            }
+                                        }
                                     }
                                 }
                             }

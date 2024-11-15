@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Environment {
     values: HashMap<String, Value>,
     enclosing: Option<Rc<RefCell<Environment>>>,
@@ -15,10 +15,11 @@ pub struct Environment {
 
 
 #[derive(Debug)]
-pub struct RuntimeError {
-    pub message: String,
-    pub line: usize,
+pub enum RuntimeError {
+    Error { message: String, line: usize },
+    Return(Value),
 }
+
 
 impl Environment {
     pub fn new() -> Self {
@@ -79,7 +80,7 @@ impl Environment {
 
 impl RuntimeError {
     pub fn new(message: String, line: usize) -> Self {
-        RuntimeError { message, line }
+        RuntimeError::Error { message, line }
     }
 }
 
@@ -90,7 +91,9 @@ pub enum Value {
     Boolean(bool),
     Nil,
     NativeFunction(fn() -> Value),
+    Function(String, Vec<Token>, Vec<Stmt>, Rc<RefCell<Environment>>),
 }
+
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -100,6 +103,7 @@ impl fmt::Display for Value {
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction(_) => write!(f, "<native fn>"),
+            Value::Function(name, _, _, _) => write!(f, "<fn {}>", name),
         }
     }
 }
@@ -200,7 +204,13 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, Run
             }
         },
         Expr::Variable(name) => {
-            env.borrow().get(name).map_err(|err| RuntimeError::new(err.message, name.line))
+            env.borrow().get(name).map_err(|err| match err {
+                RuntimeError::Error { message, line: _ } => RuntimeError::Error {
+                    message: message,
+                    line: name.line,
+                },
+                RuntimeError::Return(value) => RuntimeError::Return(value),
+            })
         },
         Expr::Assign(name, value_expr) => {
             let value = evaluate(value_expr, Rc::clone(&env))?;
@@ -222,30 +232,51 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, Run
             
             evaluate(right, Rc::clone(&env))
         },
-        Expr::Call(callee, _paren, arguments) => {
+        Expr::Call(callee, paren, arguments) => {
             let callee_val = evaluate(callee, Rc::clone(&env))?;
             
             match callee_val {
                 Value::NativeFunction(func) => {
-                    if arguments.len() != 0 {
+                    if !arguments.is_empty() {
                         return Err(RuntimeError::new(
-                            "Native function 'clock' expects 0 arguments.".to_string(),
-                            0,
+                            "Native function expects 0 arguments.".to_string(),
+                            paren.line,
                         ));
                     }
                     Ok(func())
                 }
+                Value::Function(_, params, body, closure) => {
+                    if arguments.len() != params.len() {
+                        return Err(RuntimeError::Error {
+                            message: format!("Expected {} arguments but got {}.", 
+                                params.len(), arguments.len()),
+                            line: paren.line,
+                        });
+                    }
+                    
+                    let function_env = Rc::new(RefCell::new(Environment::new_with_enclosing(closure)));
+                    
+                    for (param, arg) in params.iter().zip(arguments) {
+                        let value = evaluate(arg, Rc::clone(&env))?;
+                        function_env.borrow_mut().define(param.lexeme.clone(), value);
+                    }
+                    
+                    match execute_block(&body, function_env) {
+                        Ok(_) => Ok(Value::Nil),
+                        Err(RuntimeError::Return(value)) => Ok(value),
+                        Err(e) => Err(e),
+                    }
+                }
                 _ => Err(RuntimeError::new(
                     "Can only call functions.".to_string(),
-                    0,
+                    paren.line,
                 )),
             }
         }
     }
-    
 }
-
-pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {    match stmt {
+pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {
+    match stmt {
         Stmt::Print(expr) => {
             let value = evaluate(expr, Rc::clone(&env))?;
             println!("{}", value);
@@ -285,6 +316,23 @@ pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Enviro
             }
             Ok(())
         },
+        Stmt::Function(name, params, body) => {
+            let function = Value::Function(
+                name.lexeme.clone(), 
+                params.clone(), 
+                body.clone(), 
+                Rc::clone(&env)
+            );
+            env.borrow_mut().define(name.lexeme.clone(), function);
+            Ok(())
+        },
+        Stmt::Return(_, value) => {
+            let return_value = match value {
+                Some(expr) => evaluate(expr, env)?,
+                None => Value::Nil,
+            };
+            Err(RuntimeError::Return(return_value))
+        }
     }
 }
 
