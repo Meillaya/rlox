@@ -1,4 +1,4 @@
-# Rust Interpreter Implementation
+# Rust Interpreter
 
 A robust interpreter implementation in Rust that supports expression evaluation, variable management, and control flow statements.
 
@@ -106,12 +106,3 @@ Available commands:
 - parse: Show AST representation
 - evaluate: Execute and show expression results
 - run: Execute the program
-
-## Development
-
-The interpreter is built with a clear separation of concerns:
-
-- Tokenizer: Lexical analysis
-- Parser: Syntax analysis and AST construction
-- Evaluator: Expression evaluation and statement execution
-- Environment: Variable and scope management
