@@ -10,6 +10,7 @@ pub enum Stmt {
     While(Expr, Box<Stmt>),
     Function(Token, Vec<Token>, Vec<Stmt>),
     Return(Token, Option<Expr>),
+    Class(Token, Option<Expr>, Vec<Stmt>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -22,6 +23,8 @@ pub enum Expr {
     Assign(Token, Box<Expr>),
     Logical(Box<Expr>, Token, Box<Expr>),
     Call(Box<Expr>, Token, Vec<Expr>),
+    This(Token),
+    Super(Token, Token),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -142,6 +145,9 @@ impl Parser {
     }
     
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
+        if self.match_token(&[TokenType::Class]) {
+            return self.class_declaration();
+        }
         if self.match_token(&[TokenType::Return]) {
             return self.return_statement();
         }
@@ -465,6 +471,29 @@ impl Parser {
     fn previous(&self) -> &Token {
         &self.tokens[self.current - 1]
     }
+
+    fn class_declaration(&mut self) -> Result<Stmt, String> {
+        let name = self.consume(TokenType::Identifier, "Expect class name.")?.clone();
+
+        // Parse superclass if present
+        let superclass = if self.match_token(&[TokenType::Less]) {
+            let superclass_name = self.consume(TokenType::Identifier, "Expect superclass name.")?;
+            Some(Expr::Variable(superclass_name.clone()))
+        } else {
+            None
+        };
+
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+
+        let mut methods = Vec::new();
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            methods.push(self.function("method")?);
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+
+        Ok(Stmt::Class(name, superclass, methods))
+    }
 }
 
 
@@ -492,6 +521,8 @@ pub fn print_ast(expr: &Expr) -> String {
                     result.push_str(&format!(" {}", print_ast(arg)));
                 }
                 result
-            }
+            },
+        Expr::This(token) => format!("this"),
+        Expr::Super(keyword, method) => format!("super.{}", method.lexeme),
     }
 }

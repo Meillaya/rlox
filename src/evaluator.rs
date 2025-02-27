@@ -75,6 +75,39 @@ impl Environment {
             Value::Number(now.as_secs_f64())
         }));
     }
+
+    /// Optimized variable lookup: get the variable's value at a given distance in the environment chain.
+    pub fn get_at(&self, distance: usize, name: &Token) -> Result<Value, RuntimeError> {
+        if distance == 0 {
+            self.values.get(&name.lexeme).cloned().ok_or(RuntimeError::new(
+                format!("Undefined variable '{}'", name.lexeme), name.line
+            ))
+        } else {
+            if let Some(ref enclosing) = self.enclosing {
+                enclosing.borrow().get_at(distance - 1, name)
+            } else {
+                Err(RuntimeError::new(
+                    format!("Undefined variable '{}'", name.lexeme), name.line
+                ))
+            }
+        }
+    }
+
+    /// Optimized variable assignment at a given depth in the environment chain.
+    pub fn assign_at(&mut self, distance: usize, name: &Token, value: Value) -> Result<(), RuntimeError> {
+        if distance == 0 {
+            self.values.insert(name.lexeme.clone(), value);
+            Ok(())
+        } else {
+            if let Some(ref enclosing) = self.enclosing {
+                enclosing.borrow_mut().assign_at(distance - 1, name, value)
+            } else {
+                Err(RuntimeError::new(
+                    format!("Undefined variable '{}'", name.lexeme), name.line
+                ))
+            }
+        }
+    }
 }
 
 
@@ -123,222 +156,257 @@ fn is_string(value: &Value) -> bool {
     matches!(value, Value::String(_))
 }
 
-pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>) -> Result<Value, RuntimeError> {
+pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>, locals: &HashMap<usize, usize>) -> Result<Value, RuntimeError> {
     match expr {
         Expr::Literal(literal) => Ok(match literal {
-            LiteralValue::Boolean(value) => Value::Boolean(*value),
-            LiteralValue::Number(value) => Value::Number(*value),
-            LiteralValue::String(value) => Value::String(value.clone()),
-            LiteralValue::Nil => Value::Nil,
-        }),
-        Expr::Grouping(expr) => evaluate(expr, Rc::clone(&env)),
+                        LiteralValue::Boolean(value) => Value::Boolean(*value),
+                        LiteralValue::Number(value) => Value::Number(*value),
+                        LiteralValue::String(value) => Value::String(value.clone()),
+                        LiteralValue::Nil => Value::Nil,
+            }),
+        Expr::Grouping(expr) => evaluate(expr, Rc::clone(&env), locals),
         Expr::Unary(operator, expr) => {
-            let right = evaluate(expr, Rc::clone(&env))?;
-            match operator.token_type {
-                TokenType::Minus => {
-                    if let Value::Number(n) = right {
-                        Ok(Value::Number(-n))
-                    } else {
-                        Err(RuntimeError::new("Operand must be a number.".to_string(), operator.line))
-                    }
-                },
-                TokenType::Bang => Ok(Value::Boolean(!is_truthy(&right))),
-                _ => Ok(Value::String("Unimplemented".to_string())),
-            }
-        },
-        Expr::Binary(left, operator, right) => {
-            let left = evaluate(left, Rc::clone(&env))?;
-            let right = evaluate(right, Rc::clone(&env))?;
-            match operator.token_type {
-                TokenType::Plus => {
-                    if is_number(&left) && is_number(&right) {
-                        Ok(Value::Number(get_number(&left)? + get_number(&right)?))
-                    } else if is_string(&left) && is_string(&right) {
-                        match (&left, &right) {
-                            (Value::String(l), Value::String(r)) => Ok(Value::String(format!("{}{}", l, r))),
-                            _ => unreachable!(),
-                        }
-                    } else {
-                        Err(RuntimeError::new("Operands must be two numbers or two strings.".to_string(), operator.line))
-                    }
-                },
-                TokenType::Minus => {
-                    if is_number(&left) && is_number(&right) {
-                        Ok(Value::Number(get_number(&left)? - get_number(&right)?))
-                    } else {
-                        Err(RuntimeError::new("Operands must be numbers.".to_string(), operator.line))
-                    }
-                },
-                TokenType::Star => {
-                    if is_number(&left) && is_number(&right) {
-                        Ok(Value::Number(get_number(&left)? * get_number(&right)?))
-                    } else {
-                        Err(RuntimeError::new("Operands must be numbers.".to_string(), operator.line))
-                    }
-                },
-                TokenType::Slash => {
-                    if is_number(&left) && is_number(&right) {
-                        let right_num = get_number(&right)?;
-                        if right_num == 0.0 {
-                            Err(RuntimeError::new("Division by zero.".to_string(), operator.line))
+                let right = evaluate(expr, Rc::clone(&env), locals)?;
+                match operator.token_type {
+                    TokenType::Minus => {
+                        if let Value::Number(n) = right {
+                            Ok(Value::Number(-n))
                         } else {
-                            Ok(Value::Number(get_number(&left)? / right_num))
+                            Err(RuntimeError::new("Operand must be a number.".to_string(), operator.line))
                         }
-                    } else {
-                        Err(RuntimeError::new("Operands must be numbers.".to_string(), operator.line))
-                    }
-                },
-                TokenType::Greater => compare_values(&left, &right, |a, b| a > b),
-                TokenType::GreaterEqual => compare_values(&left, &right, |a, b| a >= b),
-                TokenType::Less => compare_values(&left, &right, |a, b| a < b),
-                TokenType::LessEqual => compare_values(&left, &right, |a, b| a <= b),
-                TokenType::EqualEqual => {
-                    let result = compare_equality(&left, &right)?;
-                    Ok(Value::Boolean(result))
-                },
-                TokenType::BangEqual => {
-                    let result = compare_equality(&left, &right)?;
-                    Ok(Value::Boolean(!result))
-                },
-                _ => Ok(Value::String("Unimplemented".to_string())),
-            }
-        },
+                    },
+                    TokenType::Bang => Ok(Value::Boolean(!is_truthy(&right))),
+                    _ => Ok(Value::String("Unimplemented".to_string())),
+                }
+            },
+        Expr::Binary(left, operator, right) => {
+                let left = evaluate(left, Rc::clone(&env), locals)?;
+                let right = evaluate(right, Rc::clone(&env), locals)?;
+                match operator.token_type {
+                    TokenType::Plus => {
+                        if is_number(&left) && is_number(&right) {
+                            Ok(Value::Number(get_number(&left)? + get_number(&right)?))
+                        } else if is_string(&left) && is_string(&right) {
+                            match (&left, &right) {
+                                (Value::String(l), Value::String(r)) => Ok(Value::String(format!("{}{}", l, r))),
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            Err(RuntimeError::new("Operands must be two numbers or two strings.".to_string(), operator.line))
+                        }
+                    },
+                    TokenType::Minus => {
+                        if is_number(&left) && is_number(&right) {
+                            Ok(Value::Number(get_number(&left)? - get_number(&right)?))
+                        } else {
+                            Err(RuntimeError::new("Operands must be numbers.".to_string(), operator.line))
+                        }
+                    },
+                    TokenType::Star => {
+                        if is_number(&left) && is_number(&right) {
+                            Ok(Value::Number(get_number(&left)? * get_number(&right)?))
+                        } else {
+                            Err(RuntimeError::new("Operands must be numbers.".to_string(), operator.line))
+                        }
+                    },
+                    TokenType::Slash => {
+                        if is_number(&left) && is_number(&right) {
+                            let right_num = get_number(&right)?;
+                            if right_num == 0.0 {
+                                Err(RuntimeError::new("Division by zero.".to_string(), operator.line))
+                            } else {
+                                Ok(Value::Number(get_number(&left)? / right_num))
+                            }
+                        } else {
+                            Err(RuntimeError::new("Operands must be numbers.".to_string(), operator.line))
+                        }
+                    },
+                    TokenType::Greater => compare_values(&left, &right, |a, b| a > b),
+                    TokenType::GreaterEqual => compare_values(&left, &right, |a, b| a >= b),
+                    TokenType::Less => compare_values(&left, &right, |a, b| a < b),
+                    TokenType::LessEqual => compare_values(&left, &right, |a, b| a <= b),
+                    TokenType::EqualEqual => {
+                        let result = compare_equality(&left, &right)?;
+                        Ok(Value::Boolean(result))
+                    },
+                    TokenType::BangEqual => {
+                        let result = compare_equality(&left, &right)?;
+                        Ok(Value::Boolean(!result))
+                    },
+                    _ => Ok(Value::String("Unimplemented".to_string())),
+                }
+            },
         Expr::Variable(name) => {
-            env.borrow().get(name).map_err(|err| match err {
-                RuntimeError::Error { message, line: _ } => RuntimeError::Error {
-                    message: message,
-                    line: name.line,
-                },
-                RuntimeError::Return(value) => RuntimeError::Return(value),
-            })
-        },
+                let expr_ptr = expr as *const Expr as usize;
+                if let Some(&distance) = locals.get(&expr_ptr) {
+                    env.borrow().get_at(distance, name)
+                } else {
+                    env.borrow().get(name)
+                }
+            },
         Expr::Assign(name, value_expr) => {
-            let value = evaluate(value_expr, Rc::clone(&env))?;
-            env.borrow_mut().assign(name, value.clone())?;
-            Ok(value)
-        },
+                let value = evaluate(value_expr, Rc::clone(&env), locals)?;
+                let expr_ptr = expr as *const Expr as usize;
+                if let Some(&distance) = locals.get(&expr_ptr) {
+                    env.borrow_mut().assign_at(distance, name, value.clone())?;
+                } else {
+                    env.borrow_mut().assign(name, value.clone())?;
+                }
+                Ok(value)
+            },
         Expr::Logical(left, operator, right) => {
-            let left_val = evaluate(left, Rc::clone(&env))?;
+                let left_val = evaluate(left, Rc::clone(&env), locals)?;
             
-            if operator.token_type == TokenType::Or {
-                if is_truthy(&left_val) {
-                    return Ok(left_val);
+                if operator.token_type == TokenType::Or {
+                    if is_truthy(&left_val) {
+                        return Ok(left_val);
+                    }
+                } else if operator.token_type == TokenType::And {
+                    if !is_truthy(&left_val) {
+                        return Ok(left_val);
+                    }
                 }
-            } else if operator.token_type == TokenType::And {
-                if !is_truthy(&left_val) {
-                    return Ok(left_val);
-                }
-            }
             
-            evaluate(right, Rc::clone(&env))
-        },
+                evaluate(right, Rc::clone(&env), locals)
+            },
         Expr::Call(callee, paren, arguments) => {
-            let callee_val = evaluate(callee, Rc::clone(&env))?;
+                let callee_val = evaluate(callee, Rc::clone(&env), locals)?;
             
-            match callee_val {
-                Value::NativeFunction(func) => {
-                    if !arguments.is_empty() {
-                        return Err(RuntimeError::new(
-                            "Native function expects 0 arguments.".to_string(),
-                            paren.line,
-                        ));
+                match callee_val {
+                    Value::NativeFunction(func) => {
+                        if !arguments.is_empty() {
+                            return Err(RuntimeError::new(
+                                "Native function expects 0 arguments.".to_string(),
+                                paren.line,
+                            ));
+                        }
+                        Ok(func())
                     }
-                    Ok(func())
+                    Value::Function(_, params, body, closure) => {
+                        if arguments.len() != params.len() {
+                            return Err(RuntimeError::Error {
+                                message: format!("Expected {} arguments but got {}.", 
+                                    params.len(), arguments.len()),
+                                line: paren.line,
+                            });
+                        }
+                    
+                        let function_env = Rc::new(RefCell::new(Environment::new_with_enclosing(closure)));
+                    
+                        for (param, arg) in params.iter().zip(arguments) {
+                            let value = evaluate(arg, Rc::clone(&env), locals)?;
+                            function_env.borrow_mut().define(param.lexeme.clone(), value);
+                        }
+                    
+                        match execute_block(&body, function_env, locals) {
+                            Ok(_) => Ok(Value::Nil),
+                            Err(RuntimeError::Return(value)) => Ok(value),
+                            Err(e) => Err(e),
+                        }
+                    }
+                    _ => Err(RuntimeError::new(
+                        "Can only call functions.".to_string(),
+                        paren.line,
+                    )),
                 }
-                Value::Function(_, params, body, closure) => {
-                    if arguments.len() != params.len() {
-                        return Err(RuntimeError::Error {
-                            message: format!("Expected {} arguments but got {}.", 
-                                params.len(), arguments.len()),
-                            line: paren.line,
-                        });
-                    }
-                    
-                    let function_env = Rc::new(RefCell::new(Environment::new_with_enclosing(closure)));
-                    
-                    for (param, arg) in params.iter().zip(arguments) {
-                        let value = evaluate(arg, Rc::clone(&env))?;
-                        function_env.borrow_mut().define(param.lexeme.clone(), value);
-                    }
-                    
-                    match execute_block(&body, function_env) {
-                        Ok(_) => Ok(Value::Nil),
-                        Err(RuntimeError::Return(value)) => Ok(value),
-                        Err(e) => Err(e),
-                    }
-                }
-                _ => Err(RuntimeError::new(
-                    "Can only call functions.".to_string(),
-                    paren.line,
-                )),
             }
-        }
+        Expr::This(token) => {
+            let expr_ptr = expr as *const Expr as usize;
+            if let Some(&distance) = locals.get(&expr_ptr) {
+                env.borrow().get_at(distance, token)
+            } else {
+                env.borrow().get(token)
+            }
+        },
+        Expr::Super(token, method) => {
+            let expr_ptr = expr as *const Expr as usize;
+            if let Some(&distance) = locals.get(&expr_ptr) {
+                // Look up "super" in the environment
+                let superclass = env.borrow().get_at(distance, token)?;
+                // For now, return an error since we haven't implemented class/instance support yet
+                Err(RuntimeError::new(
+                    format!("Super class method resolution not yet implemented for '{}'", method.lexeme),
+                    token.line,
+                ))
+            } else {
+                Err(RuntimeError::new(
+                    "Could not resolve 'super' reference".to_string(),
+                    token.line,
+                ))
+            }
+        },
     }
 }
-pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {
+pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>, locals: &HashMap<usize, usize>) -> Result<(), RuntimeError> {
     match stmt {
         Stmt::Print(expr) => {
-            let value = evaluate(expr, Rc::clone(&env))?;
-            println!("{}", value);
-            Ok(())
-        }
+                        let value = evaluate(expr, Rc::clone(&env), locals)?;
+                        println!("{}", value);
+                        Ok(())
+            }
         Stmt::Expression(expr) => {
-            let value = evaluate(expr, Rc::clone(&env))?;
-            if print_expr_result {
-                println!("{}", value);
+                let value = evaluate(expr, Rc::clone(&env), locals)?;
+                if print_expr_result {
+                    println!("{}", value);
+                }
+                Ok(())
             }
-            Ok(())
-        }
         Stmt::Var(name, initializer) => {
-            let value = match initializer {
-                Some(expr) => evaluate(expr, Rc::clone(&env))?,
-                None => Value::Nil,
-            };
-            env.borrow_mut().define(name.lexeme.clone(), value);
-            Ok(())
-        }
+                let value = match initializer {
+                    Some(expr) => evaluate(expr, Rc::clone(&env), locals)?,
+                    None => Value::Nil,
+                };
+                env.borrow_mut().define(name.lexeme.clone(), value);
+                Ok(())
+            }
         Stmt::Block(statements) => {
-            let block_env = Rc::new(RefCell::new(Environment::new_with_enclosing(Rc::clone(&env))));
-            execute_block(statements, block_env)
-        },
+                let block_env = Rc::new(RefCell::new(Environment::new_with_enclosing(Rc::clone(&env))));
+                execute_block(statements, block_env, locals)
+            },
         Stmt::If(condition, then_branch, else_branch) => {
-            let condition_value = evaluate(condition, Rc::clone(&env))?;
-            if is_truthy(&condition_value) {
-                execute_stmt(then_branch, print_expr_result, Rc::clone(&env))?;
-            } else if let Some(else_stmt) = else_branch {
-                execute_stmt(else_stmt, print_expr_result, Rc::clone(&env))?;
-            }
-            Ok(())
-        },
+                let condition_value = evaluate(condition, Rc::clone(&env), locals)?;
+                if is_truthy(&condition_value) {
+                    execute_stmt(then_branch, print_expr_result, Rc::clone(&env), locals)?;
+                } else if let Some(else_stmt) = else_branch {
+                    execute_stmt(else_stmt, print_expr_result, Rc::clone(&env), locals)?;
+                }
+                Ok(())
+            },
         Stmt::While(condition, body) => {
-            while is_truthy(&evaluate(condition, Rc::clone(&env))?) {
-                execute_stmt(body, print_expr_result, Rc::clone(&env))?;
-            }
-            Ok(())
-        },
+                while is_truthy(&evaluate(condition, Rc::clone(&env), locals)?) {
+                    execute_stmt(body, print_expr_result, Rc::clone(&env), locals)?;
+                }
+                Ok(())
+            },
         Stmt::Function(name, params, body) => {
-            let function = Value::Function(
-                name.lexeme.clone(), 
-                params.clone(), 
-                body.clone(), 
-                Rc::clone(&env)
-            );
-            env.borrow_mut().define(name.lexeme.clone(), function);
+                let function = Value::Function(
+                    name.lexeme.clone(), 
+                    params.clone(), 
+                    body.clone(), 
+                    Rc::clone(&env)
+                );
+                env.borrow_mut().define(name.lexeme.clone(), function);
+                Ok(())
+            },
+        Stmt::Return(_, value) => {
+                let return_value = match value {
+                    Some(expr) => evaluate(expr, env, locals)?,
+                    None => Value::Nil,
+                };
+                Err(RuntimeError::Return(return_value))
+            }
+        Stmt::Class(name, superclass, methods) => {
+            // For now, just define the class name in the environment
+            // This is a minimal implementation that allows class declarations to parse
+            env.borrow_mut().define(name.lexeme.clone(), Value::Nil);
             Ok(())
         },
-        Stmt::Return(_, value) => {
-            let return_value = match value {
-                Some(expr) => evaluate(expr, env)?,
-                None => Value::Nil,
-            };
-            Err(RuntimeError::Return(return_value))
-        }
     }
 }
 
-fn execute_block(statements: &[Stmt], env: Rc<RefCell<Environment>>) -> Result<(), RuntimeError> {
+fn execute_block(statements: &[Stmt], env: Rc<RefCell<Environment>>, locals: &HashMap<usize, usize>) -> Result<(), RuntimeError> {
     for statement in statements {
-        execute_stmt(statement, false, Rc::clone(&env))?;
+        execute_stmt(statement, false, Rc::clone(&env), locals)?;
     }
     Ok(())
 }

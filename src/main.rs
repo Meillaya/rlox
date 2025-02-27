@@ -8,11 +8,12 @@ use std::rc::Rc;
 mod tokenizer;
 mod parser;
 mod evaluator;
+mod resolver;
 
-use evaluator::RuntimeError;
-use tokenizer::{Tokenizer, TokenType, Token};
+use evaluator::{RuntimeError, execute_stmt, Environment};
 use parser::{Parser, print_ast};
-use evaluator::{Environment,execute_stmt};
+use resolver::Resolver;
+use tokenizer::{Tokenizer, TokenType, Token};
 
 fn read_and_tokenize(filename: &str) -> Result<Vec<Token>, String> {
     let file_contents = fs::read_to_string(filename).unwrap_or_else(|_| {
@@ -57,18 +58,15 @@ fn main() {
             });
 
             if !file_contents.is_empty() {
-                
                 let mut tokenizer = Tokenizer::new(&file_contents);
-
                 let tokens = tokenizer.scan_tokens();
                 for token in tokens {
-
-                    if token.token_type != TokenType::WhiteSpace{
+                    if token.token_type != TokenType::WhiteSpace {
                         println!("{} {} {}", token.token_type, token.lexeme, token.literal.as_deref().unwrap_or("null"));
                     }
                 }
-            if tokenizer.has_error {
-                    std::process::exit(65);
+                if tokenizer.has_error {
+                    process::exit(65);
                 }
             } else {
                 println!("EOF  null");
@@ -80,6 +78,15 @@ fn main() {
                     let mut parser = Parser::new(tokens);
                     match parser.parse() {
                         Ok(statements) => {
+                            // Run resolver on the statements
+                            let mut resolver = Resolver::new();
+                            resolver.resolve(&statements);
+                            if !resolver.errors.is_empty() {
+                                for error in resolver.errors {
+                                    eprintln!("Resolver error: {}", error);
+                                }
+                                process::exit(65);
+                            }
                             if let Some(stmt) = statements.first() {
                                 if let parser::Stmt::Expression(expr) = stmt {
                                     println!("{}", print_ast(expr));
@@ -108,10 +115,20 @@ fn main() {
                     let mut parser = Parser::new(tokens);
                     match parser.parse() {
                         Ok(statements) => {
-                            let env = Rc::new(RefCell::new(Environment::new()));
-                            env.borrow_mut().define_natives(); // Add this line
+                            // Run resolver on the statements
+                            let mut resolver = Resolver::new();
+                            resolver.resolve(&statements);
+                            if !resolver.errors.is_empty() {
+                                for error in resolver.errors {
+                                    eprintln!("Resolver error: {}", error);
+                                }
+                                process::exit(65);
+                            }
+
+                            let env = Rc::new(RefCell::new(evaluator::Environment::new()));
+                            env.borrow_mut().define_natives();
                             for stmt in statements {
-                                match execute_stmt(&stmt, true, Rc::clone(&env)) {
+                                match execute_stmt(&stmt, true, Rc::clone(&env), &resolver.locals) {
                                     Ok(_) => {},
                                     Err(runtime_error) => {
                                         match runtime_error {
@@ -146,10 +163,20 @@ fn main() {
                     let mut parser = Parser::new(tokens);
                     match parser.parse() {
                         Ok(statements) => {
-                            let env = Rc::new(RefCell::new(Environment::new()));
-                            env.borrow_mut().define_natives(); // Add this line
+                            // Run resolver on the statements
+                            let mut resolver = Resolver::new();
+                            resolver.resolve(&statements);
+                            if !resolver.errors.is_empty() {
+                                for error in resolver.errors {
+                                    eprintln!("Resolver error: {}", error);
+                                }
+                                process::exit(65);
+                            }
+
+                            let env = Rc::new(RefCell::new(evaluator::Environment::new()));
+                            env.borrow_mut().define_natives();
                             for stmt in statements {
-                                match execute_stmt(&stmt, false, Rc::clone(&env)) {
+                                match execute_stmt(&stmt, false, Rc::clone(&env), &resolver.locals) {
                                     Ok(_) => {},
                                     Err(runtime_error) => {
                                         match runtime_error {
