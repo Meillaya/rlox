@@ -304,6 +304,7 @@ impl Resolver {
         self.scopes.last_mut().unwrap().insert(name.lexeme.clone(), true);
     }
     
+    #[allow(dead_code)]
     fn resolve_local(&mut self, expr: &Expr, name: &Token) {
         for (i, scope) in self.scopes.iter().rev().enumerate() {
             if scope.contains_key(&name.lexeme) {
