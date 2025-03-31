@@ -1,17 +1,10 @@
 use crate::parser::{Expr, LiteralValue, Stmt};
 use crate::tokenizer::{Token, TokenType};
+use crate::environment::Environment;
 use std::fmt;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
-
-
-#[derive(Debug, PartialEq)]
-pub struct Environment {
-    values: HashMap<String, Value>,
-    enclosing: Option<Rc<RefCell<Environment>>>,
-}
-
 
 
 #[derive(Debug)]
@@ -20,113 +13,43 @@ pub enum RuntimeError {
     Return(Value),
 }
 
-
-impl Environment {
-    pub fn new() -> Self {
-        Environment {
-            values: HashMap::new(),
-            enclosing: None,
-        }
-    }
-
-    pub fn define(&mut self, name: String, value: Value) {
-        self.values.insert(name, value);
-    }
-
-    pub fn get(&self, name_token: &Token) -> Result<Value, RuntimeError> {
-        if let Some(value) = self.values.get(&name_token.lexeme) {
-            Ok(value.clone())
-        } else if let Some(ref enclosing) = self.enclosing {
-            enclosing.borrow().get(name_token)
-        } else {
-            Err(RuntimeError::new(
-                format!("Undefined variable '{}'", name_token.lexeme),
-                name_token.line,
-            ))
-        }
-    }
-
-    pub fn assign(&mut self, name_token: &Token, value: Value) -> Result<(), RuntimeError> {
-        if self.values.contains_key(&name_token.lexeme) {
-            self.values.insert(name_token.lexeme.clone(), value);
-            Ok(())
-        } else if let Some(ref enclosing) = self.enclosing {
-            enclosing.borrow_mut().assign(name_token, value)
-        } else {
-            Err(RuntimeError::new(
-                format!("Undefined variable '{}'", name_token.lexeme),
-                name_token.line,
-            ))
-        }
-    }
-
-    pub fn new_with_enclosing(enclosing: Rc<RefCell<Environment>>) -> Self {
-        Environment {
-            values: HashMap::new(),
-            enclosing: Some(enclosing),
-        }
-    }
-
-    pub fn define_natives(&mut self) {
-        self.define("clock".to_string(), Value::NativeFunction(|| {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap();
-            Value::Number(now.as_secs_f64())
-        }));
-    }
-
-    /// Optimized variable lookup: get the variable's value at a given distance in the environment chain.
-    pub fn get_at(&self, distance: usize, name: &Token) -> Result<Value, RuntimeError> {
-        if distance == 0 {
-            self.values.get(&name.lexeme).cloned().ok_or(RuntimeError::new(
-                format!("Undefined variable '{}'", name.lexeme), name.line
-            ))
-        } else {
-            if let Some(ref enclosing) = self.enclosing {
-                enclosing.borrow().get_at(distance - 1, name)
-            } else {
-                Err(RuntimeError::new(
-                    format!("Undefined variable '{}'", name.lexeme), name.line
-                ))
-            }
-        }
-    }
-
-    /// Optimized variable assignment at a given depth in the environment chain.
-    pub fn assign_at(&mut self, distance: usize, name: &Token, value: Value) -> Result<(), RuntimeError> {
-        if distance == 0 {
-            self.values.insert(name.lexeme.clone(), value);
-            Ok(())
-        } else {
-            if let Some(ref enclosing) = self.enclosing {
-                enclosing.borrow_mut().assign_at(distance - 1, name, value)
-            } else {
-                Err(RuntimeError::new(
-                    format!("Undefined variable '{}'", name.lexeme), name.line
-                ))
-            }
-        }
-    }
-}
-
-
 impl RuntimeError {
     pub fn new(message: String, line: usize) -> Self {
         RuntimeError::Error { message, line }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
     Nil,
     NativeFunction(fn() -> Value),
-    Function(String, Vec<Token>, Vec<Stmt>, Rc<RefCell<Environment>>),
+    FunctionRef(String, usize, Rc<RefCell<Environment>>),
+    Class(String),
 }
 
+// Manual Debug implementation for Value to prevent recursion
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Number(n) => f.debug_tuple("Number").field(n).finish(),
+            Value::String(s) => f.debug_tuple("String").field(s).finish(),
+            Value::Boolean(b) => f.debug_tuple("Boolean").field(b).finish(),
+            Value::Nil => write!(f, "Nil"),
+            Value::NativeFunction(_) => write!(f, "NativeFunction(<fn ptr>)"),
+            Value::FunctionRef(name, stmt_id, closure_env) => {
+                f.debug_struct("FunctionRef")
+                 .field("name", name)
+                 .field("stmt_id", stmt_id)
+                 .field("closure", &format_args!("<Env@{:p}>", Rc::as_ptr(closure_env)))
+                 .finish()
+            }
+            Value::Class(name) => f.debug_tuple("Class").field(name).finish(),
+        }
+    }
+}
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -136,7 +59,8 @@ impl fmt::Display for Value {
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction(_) => write!(f, "<native fn>"),
-            Value::Function(name, _, _, _) => write!(f, "<fn {}>", name),
+            Value::FunctionRef(name, _stmt_id, _) => write!(f, "<fn {}>", name),
+            Value::Class(name) => write!(f, "{}", name),
         }
     }
 }
@@ -156,17 +80,150 @@ fn is_string(value: &Value) -> bool {
     matches!(value, Value::String(_))
 }
 
-pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>, locals: &HashMap<usize, usize>) -> Result<Value, RuntimeError> {
-    match expr {
-        Expr::Literal(literal) => Ok(match literal {
-                        LiteralValue::Boolean(value) => Value::Boolean(*value),
-                        LiteralValue::Number(value) => Value::Number(*value),
-                        LiteralValue::String(value) => Value::String(value.clone()),
-                        LiteralValue::Nil => Value::Nil,
+pub struct Interpreter {
+    source_statements: Rc<Vec<Stmt>>,
+    environment: Rc<RefCell<Environment>>,
+    globals: Rc<RefCell<Environment>>,
+    locals: HashMap<usize, usize>,
+}
+
+impl Interpreter {
+    pub fn new(source: Rc<Vec<Stmt>>) -> Self {
+        let globals = Rc::new(RefCell::new(Environment::new()));
+        globals.borrow_mut().define_natives();
+        
+        Interpreter {
+            source_statements: source,
+            environment: Rc::clone(&globals),
+            globals,
+            locals: HashMap::new(),
+        }
+    }
+    
+    pub fn interpret(&mut self, statements: &[Stmt], print_expr_result: bool) -> Result<(), RuntimeError> {
+        for statement in statements {
+            self.execute_stmt(statement, print_expr_result)?;
+        }
+        Ok(())
+    }
+    
+    fn get_stmt_id(&self, stmt: &Stmt) -> usize { stmt as *const _ as usize }
+    fn get_expr_id(&self, expr: &Expr) -> usize { expr as *const _ as usize }
+    
+    pub fn set_locals(&mut self, locals: HashMap<usize, usize>) { self.locals = locals; }
+    
+    fn look_up_variable(&self, name: &Token, expr: &Expr) -> Result<Value, RuntimeError> {
+        let expr_id = self.get_expr_id(expr);
+        eprintln!("[Evaluator] Looking up variable: '{}' (Expr ID: {}) at line {}", name.lexeme, expr_id, name.line);
+
+        if let Some(distance) = self.locals.get(&expr_id) {
+            eprintln!("[Evaluator] Found distance {} in locals map for '{}'. Trying environment.get_at({}, \"{}\").", distance, name.lexeme, distance, name.lexeme);
+            let value = self.environment.borrow().get_at(*distance, &name.lexeme);
+            eprintln!("[Evaluator] environment.get_at({}, '{}') returned: {:?}", distance, name.lexeme, value);
+            
+            value.ok_or_else(|| RuntimeError::new(format!("Undefined variable '{}'.", name.lexeme), name.line))
+        } else {
+            eprintln!("[Evaluator] Variable '{}' not found in locals map. Assuming global. Trying globals.get(\"{}\").", name.lexeme, name.lexeme);
+            let result = self.globals.borrow().get(name);
+            eprintln!("[Evaluator] globals.get('{}') returned: {:?}", name.lexeme, result);
+            result
+        }
+    }
+    
+    fn execute_stmt(&mut self, stmt: &Stmt, print_expr_result: bool) -> Result<(), RuntimeError> {
+        match stmt {
+            Stmt::Print(expr) => {
+                let value = self.evaluate(expr)?;
+                println!("{}", value);
+                Ok(())
+            }
+            Stmt::Expression(expr) => {
+                let value = self.evaluate(expr)?;
+                if print_expr_result {
+                    println!("{}", value);
+                }
+                Ok(())
+            }
+            Stmt::Var(name, initializer) => {
+                let value = match initializer {
+                    Some(expr) => self.evaluate(expr)?,
+                    None => Value::Nil,
+                };
+                self.environment.borrow_mut().define(name.lexeme.clone(), value);
+                Ok(())
+            }
+            Stmt::Block(statements) => {
+                let block_env = Rc::new(RefCell::new(Environment::new_with_enclosing(Rc::clone(&self.environment))));
+                self.execute_block(statements, block_env, print_expr_result)
+            }
+            Stmt::Function(name, params, body) => {
+                let stmt_id = self.get_stmt_id(stmt);
+                let function_ref = Value::FunctionRef(
+                    name.lexeme.clone(), 
+                    stmt_id, 
+                    Rc::clone(&self.environment)
+                );
+                self.environment.borrow_mut().define(name.lexeme.clone(), function_ref);
+                Ok(())
+            },
+            Stmt::Class { name, methods } => {
+                self.environment.borrow_mut().define(
+                    name.lexeme.clone(), 
+                    Value::Class(name.lexeme.clone())
+                );
+                Ok(())
+            },
+            Stmt::If(condition, then_branch, else_branch) => {
+                let condition_value = self.evaluate(condition)?;
+                if is_truthy(&condition_value) {
+                    self.execute_stmt(then_branch, print_expr_result)?;
+                } else if let Some(else_stmt) = else_branch {
+                    self.execute_stmt(else_stmt, print_expr_result)?;
+                }
+                Ok(())
+            },
+            Stmt::While(condition, body) => {
+                while is_truthy(&self.evaluate(condition)?) {
+                    self.execute_stmt(body, print_expr_result)?;
+                }
+                Ok(())
+            },
+            Stmt::Return(_, value) => {
+                let return_value = match value {
+                    Some(expr) => self.evaluate(expr)?,
+                    None => Value::Nil,
+                };
+                Err(RuntimeError::Return(return_value))
+            }
+        }
+    }
+    
+    fn execute_block(&mut self, statements: &[Stmt], environment: Rc<RefCell<Environment>>, print_expr_result: bool) -> Result<(), RuntimeError> {
+        let previous = Rc::clone(&self.environment);
+        self.environment = environment;
+        
+        let result = (|| {
+            for statement in statements {
+                self.execute_stmt(statement, print_expr_result)?;
+            }
+            Ok(())
+        })();
+        
+        self.environment = previous;
+        result
+    }
+    
+    fn evaluate(&self, expr: &Expr) -> Result<Value, RuntimeError> {
+        match expr {
+            Expr::Literal(literal) => Ok(match literal {
+                LiteralValue::Boolean(value) => Value::Boolean(*value),
+                LiteralValue::Number(value) => Value::Number(*value),
+                LiteralValue::String(value) => Value::String(value.clone()),
+                LiteralValue::Nil => Value::Nil,
             }),
-        Expr::Grouping(expr) => evaluate(expr, Rc::clone(&env), locals),
-        Expr::Unary(operator, expr) => {
-                let right = evaluate(expr, Rc::clone(&env), locals)?;
+            Expr::Grouping(expr) => self.evaluate(expr),
+            Expr::Unary(operator, expr) => {
+                let right = self.evaluate(expr)?;
                 match operator.token_type {
                     TokenType::Minus => {
                         if let Value::Number(n) = right {
@@ -179,9 +236,9 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>, locals: &HashMap<usi
                     _ => Ok(Value::String("Unimplemented".to_string())),
                 }
             },
-        Expr::Binary(left, operator, right) => {
-                let left = evaluate(left, Rc::clone(&env), locals)?;
-                let right = evaluate(right, Rc::clone(&env), locals)?;
+            Expr::Binary(left, operator, right) => {
+                let left = self.evaluate(left)?;
+                let right = self.evaluate(right)?;
                 match operator.token_type {
                     TokenType::Plus => {
                         if is_number(&left) && is_number(&right) {
@@ -221,42 +278,33 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>, locals: &HashMap<usi
                             Err(RuntimeError::new("Operands must be numbers.".to_string(), operator.line))
                         }
                     },
-                    TokenType::Greater => compare_values(&left, &right, |a, b| a > b),
-                    TokenType::GreaterEqual => compare_values(&left, &right, |a, b| a >= b),
-                    TokenType::Less => compare_values(&left, &right, |a, b| a < b),
-                    TokenType::LessEqual => compare_values(&left, &right, |a, b| a <= b),
-                    TokenType::EqualEqual => {
-                        let result = compare_equality(&left, &right)?;
-                        Ok(Value::Boolean(result))
-                    },
-                    TokenType::BangEqual => {
-                        let result = compare_equality(&left, &right)?;
-                        Ok(Value::Boolean(!result))
-                    },
+                    TokenType::Greater => compare_values(&left, &right, |a, b| a > b, operator.line),
+                    TokenType::GreaterEqual => compare_values(&left, &right, |a, b| a >= b, operator.line),
+                    TokenType::Less => compare_values(&left, &right, |a, b| a < b, operator.line),
+                    TokenType::LessEqual => compare_values(&left, &right, |a, b| a <= b, operator.line),
+                    TokenType::EqualEqual => Ok(Value::Boolean(compare_equality(&left, &right))),
+                    TokenType::BangEqual => Ok(Value::Boolean(!compare_equality(&left, &right))),
                     _ => Ok(Value::String("Unimplemented".to_string())),
                 }
             },
-        Expr::Variable(name) => {
-                let expr_ptr = expr as *const Expr as usize;
-                if let Some(&distance) = locals.get(&expr_ptr) {
-                    env.borrow().get_at(distance, name)
-                } else {
-                    env.borrow().get(name)
-                }
+            Expr::Variable(name) => {
+                self.look_up_variable(name, expr)
             },
-        Expr::Assign(name, value_expr) => {
-                let value = evaluate(value_expr, Rc::clone(&env), locals)?;
-                let expr_ptr = expr as *const Expr as usize;
-                if let Some(&distance) = locals.get(&expr_ptr) {
-                    env.borrow_mut().assign_at(distance, name, value.clone())?;
+            Expr::Assign(name, value_expr) => {
+                let value = self.evaluate(value_expr)?;
+                
+                let expr_id = self.get_expr_id(expr);
+                if let Some(distance) = self.locals.get(&expr_id) {
+                    self.environment.borrow_mut().assign_at(*distance, name, value.clone())?;
                 } else {
-                    env.borrow_mut().assign(name, value.clone())?;
+                    self.globals.borrow_mut().assign(name, value.clone())?;
                 }
+                
                 Ok(value)
             },
-        Expr::Logical(left, operator, right) => {
-                let left_val = evaluate(left, Rc::clone(&env), locals)?;
-            
+            Expr::Logical(left, operator, right) => {
+                let left_val = self.evaluate(left)?;
+                
                 if operator.token_type == TokenType::Or {
                     if is_truthy(&left_val) {
                         return Ok(left_val);
@@ -266,165 +314,139 @@ pub fn evaluate(expr: &Expr, env: Rc<RefCell<Environment>>, locals: &HashMap<usi
                         return Ok(left_val);
                     }
                 }
-            
-                evaluate(right, Rc::clone(&env), locals)
+                
+                self.evaluate(right)
             },
-        Expr::Call(callee, paren, arguments) => {
-                let callee_val = evaluate(callee, Rc::clone(&env), locals)?;
-            
+            Expr::Call(callee, paren, arguments) => {
+                let callee_val = self.evaluate(callee)?;
+
+                let mut arg_values = Vec::new();
+                for arg in arguments {
+                    arg_values.push(self.evaluate(arg)?);
+                }
+
                 match callee_val {
                     Value::NativeFunction(func) => {
-                        if !arguments.is_empty() {
+                        if !arg_values.is_empty() {
                             return Err(RuntimeError::new(
-                                "Native function expects 0 arguments.".to_string(),
+                                format!("Expected 0 arguments but got {}.", arg_values.len()),
                                 paren.line,
                             ));
                         }
                         Ok(func())
                     }
-                    Value::Function(_, params, body, closure) => {
-                        if arguments.len() != params.len() {
-                            return Err(RuntimeError::Error {
-                                message: format!("Expected {} arguments but got {}.", 
-                                    params.len(), arguments.len()),
-                                line: paren.line,
-                            });
-                        }
-                    
-                        let function_env = Rc::new(RefCell::new(Environment::new_with_enclosing(closure)));
-                    
-                        for (param, arg) in params.iter().zip(arguments) {
-                            let value = evaluate(arg, Rc::clone(&env), locals)?;
-                            function_env.borrow_mut().define(param.lexeme.clone(), value);
-                        }
-                    
-                        match execute_block(&body, function_env, locals) {
-                            Ok(_) => Ok(Value::Nil),
-                            Err(RuntimeError::Return(value)) => Ok(value),
-                            Err(e) => Err(e),
+                    Value::FunctionRef(name, stmt_id, closure) => {
+                        let func_stmt = self.find_stmt_by_id(stmt_id)
+                            .ok_or_else(|| RuntimeError::new(
+                                format!("Internal error: Failed to find function definition for ID {}.", stmt_id),
+                                paren.line
+                            ))?;
+
+                        if let Stmt::Function(_, params, body) = func_stmt {
+                            if arg_values.len() != params.len() {
+                                return Err(RuntimeError::Error {
+                                    message: format!("Expected {} arguments but got {}.", params.len(), arg_values.len()),
+                                    line: paren.line,
+                                });
+                            }
+
+                            let function_env = Rc::new(RefCell::new(Environment::new_with_enclosing(closure)));
+
+                            for (param, arg) in params.iter().zip(arg_values) {
+                                function_env.borrow_mut().define(param.lexeme.clone(), arg);
+                            }
+
+                            let mut temp_interpreter = Interpreter {
+                                source_statements: Rc::clone(&self.source_statements),
+                                environment: function_env,
+                                globals: Rc::clone(&self.globals),
+                                locals: self.locals.clone(),
+                            };
+                            
+                            let execution_result = (|| {
+                                for statement in body.iter() {
+                                    temp_interpreter.execute_stmt(statement, false)?;
+                                }
+                                Ok(Value::Nil)
+                            })();
+
+                            match execution_result {
+                                Err(RuntimeError::Return(value)) => Ok(value),
+                                Err(e) => Err(e),
+                                Ok(nil_value) => Ok(nil_value),
+                            }
+                        } else {
+                            Err(RuntimeError::new(
+                                format!("Internal error: FunctionRef ID {} did not point to Stmt::Function.", stmt_id),
+                                paren.line
+                            ))
                         }
                     }
                     _ => Err(RuntimeError::new(
-                        "Can only call functions.".to_string(),
+                        "Can only call functions and classes.".to_string(),
                         paren.line,
                     )),
                 }
             }
-        Expr::This(token) => {
-            let expr_ptr = expr as *const Expr as usize;
-            if let Some(&distance) = locals.get(&expr_ptr) {
-                env.borrow().get_at(distance, token)
-            } else {
-                env.borrow().get(token)
-            }
-        },
-        Expr::Super(token, method) => {
-            let expr_ptr = expr as *const Expr as usize;
-            if let Some(&distance) = locals.get(&expr_ptr) {
-                // Look up "super" in the environment
-                let superclass = env.borrow().get_at(distance, token)?;
-                // For now, return an error since we haven't implemented class/instance support yet
-                Err(RuntimeError::new(
-                    format!("Super class method resolution not yet implemented for '{}'", method.lexeme),
-                    token.line,
-                ))
-            } else {
-                Err(RuntimeError::new(
-                    "Could not resolve 'super' reference".to_string(),
-                    token.line,
-                ))
-            }
-        },
+        }
     }
-}
-pub fn execute_stmt(stmt: &Stmt, print_expr_result: bool, env: Rc<RefCell<Environment>>, locals: &HashMap<usize, usize>) -> Result<(), RuntimeError> {
-    match stmt {
-        Stmt::Print(expr) => {
-                        let value = evaluate(expr, Rc::clone(&env), locals)?;
-                        println!("{}", value);
-                        Ok(())
-            }
-        Stmt::Expression(expr) => {
-                let value = evaluate(expr, Rc::clone(&env), locals)?;
-                if print_expr_result {
-                    println!("{}", value);
+
+    fn find_stmt_by_id(&self, target_id: usize) -> Option<&Stmt> {
+        // Recursive helper to search within a slice of statements
+        fn find_in_stmt_slice<'a>(stmts: &'a [Stmt], target_id: usize) -> Option<&'a Stmt> {
+            for stmt in stmts {
+                // Use helper to check the statement itself and recurse if necessary
+                if let Some(found) = find_in_stmt(stmt, target_id) {
+                    return Some(found);
                 }
-                Ok(())
             }
-        Stmt::Var(name, initializer) => {
-                let value = match initializer {
-                    Some(expr) => evaluate(expr, Rc::clone(&env), locals)?,
-                    None => Value::Nil,
-                };
-                env.borrow_mut().define(name.lexeme.clone(), value);
-                Ok(())
-            }
-        Stmt::Block(statements) => {
-                let block_env = Rc::new(RefCell::new(Environment::new_with_enclosing(Rc::clone(&env))));
-                execute_block(statements, block_env, locals)
-            },
-        Stmt::If(condition, then_branch, else_branch) => {
-                let condition_value = evaluate(condition, Rc::clone(&env), locals)?;
-                if is_truthy(&condition_value) {
-                    execute_stmt(then_branch, print_expr_result, Rc::clone(&env), locals)?;
-                } else if let Some(else_stmt) = else_branch {
-                    execute_stmt(else_stmt, print_expr_result, Rc::clone(&env), locals)?;
-                }
-                Ok(())
-            },
-        Stmt::While(condition, body) => {
-                while is_truthy(&evaluate(condition, Rc::clone(&env), locals)?) {
-                    execute_stmt(body, print_expr_result, Rc::clone(&env), locals)?;
-                }
-                Ok(())
-            },
-        Stmt::Function(name, params, body) => {
-                let function = Value::Function(
-                    name.lexeme.clone(), 
-                    params.clone(), 
-                    body.clone(), 
-                    Rc::clone(&env)
-                );
-                env.borrow_mut().define(name.lexeme.clone(), function);
-                Ok(())
-            },
-        Stmt::Return(_, value) => {
-                let return_value = match value {
-                    Some(expr) => evaluate(expr, env, locals)?,
-                    None => Value::Nil,
-                };
-                Err(RuntimeError::Return(return_value))
-            }
-        Stmt::Class(name, superclass, methods) => {
-            // For now, just define the class name in the environment
-            // This is a minimal implementation that allows class declarations to parse
-            env.borrow_mut().define(name.lexeme.clone(), Value::Nil);
-            Ok(())
-        },
+            None
+        }
+        
+        // Recursive helper to search a single statement and its children
+        fn find_in_stmt<'a>(stmt: &'a Stmt, target_id: usize) -> Option<&'a Stmt> {
+             // Check if the current statement is the target
+             if (stmt as *const Stmt as usize) == target_id { 
+                 return Some(stmt); 
+             }
+             
+             // Recurse into nested statements based on type
+             match stmt {
+                 Stmt::Block(body) => find_in_stmt_slice(body, target_id),
+                 Stmt::If(_, then_branch, else_branch) => {
+                    // Dereference Box<Stmt> before recursing
+                    find_in_stmt(&**then_branch, target_id).or_else(|| {
+                        else_branch.as_ref().and_then(|eb| find_in_stmt(&**eb, target_id))
+                    })
+                 }
+                 Stmt::While(_, body_stmt) => {
+                     // Dereference Box<Stmt> before recursing
+                     find_in_stmt(&**body_stmt, target_id)
+                 }
+                 Stmt::Function(_, _, body_vec) => find_in_stmt_slice(body_vec, target_id),
+                  _ => None, // Other statement types don't contain nested statements to search
+             }
+        }
+
+        // Start the search from the top-level statements
+        find_in_stmt_slice(&self.source_statements, target_id)
     }
 }
 
-fn execute_block(statements: &[Stmt], env: Rc<RefCell<Environment>>, locals: &HashMap<usize, usize>) -> Result<(), RuntimeError> {
-    for statement in statements {
-        execute_stmt(statement, false, Rc::clone(&env), locals)?;
-    }
-    Ok(())
-}
-
-fn compare_equality(left: &Value, right: &Value) -> Result<bool, RuntimeError> {
+fn compare_equality(left: &Value, right: &Value) -> bool {
     match (left, right) {
-        (Value::Number(l), Value::Number(r)) => Ok((l - r).abs() < f64::EPSILON),
-        (Value::String(l), Value::String(r)) => Ok(l == r),
-        (Value::Boolean(l), Value::Boolean(r)) => Ok(l == r),
-        (Value::Nil, Value::Nil) => Ok(true),
-        _ => Ok(false),
+        (Value::Number(l), Value::Number(r)) => (l - r).abs() < f64::EPSILON,
+        (Value::String(l), Value::String(r)) => l == r,
+        (Value::Boolean(l), Value::Boolean(r)) => l == r,
+        (Value::Nil, Value::Nil) => true,
+        _ => false,
     }
 }
 
-fn compare_values(left: &Value, right: &Value, compare: fn(f64, f64) -> bool) -> Result<Value, RuntimeError> {
+fn compare_values(left: &Value, right: &Value, compare: fn(f64, f64) -> bool, line: usize) -> Result<Value, RuntimeError> {
     match (left, right) {
         (Value::Number(l), Value::Number(r)) => Ok(Value::Boolean(compare(*l, *r))),
-        _ => Err(RuntimeError::new("Operands must be numbers.".to_string(), 0)),
+        _ => Err(RuntimeError::new("Operands must be numbers.".to_string(), line)),
     }
 }
 
@@ -435,5 +457,4 @@ fn is_truthy(value: &Value) -> bool {
         _ => true,
     }
 }
-
 
