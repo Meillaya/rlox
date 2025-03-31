@@ -10,7 +10,7 @@ pub enum Stmt {
     While(Expr, Box<Stmt>),
     Function(Token, Vec<Token>, Vec<Stmt>),
     Return(Token, Option<Expr>),
-    Class { name: Token, methods: Vec<Stmt> },
+    Class { name: Token, superclass: Option<Expr>, methods: Vec<Stmt> },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -26,6 +26,7 @@ pub enum Expr {
     Get(Box<Expr>, Token),
     Set(Box<Expr>, Token, Box<Expr>),
     This(Token),
+    Super(Token, Token),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -388,12 +389,12 @@ impl Parser {
         } else if self.match_token(&[TokenType::Nil]) {
             Ok(Expr::Literal(LiteralValue::Nil))
         } else if self.match_token(&[TokenType::Number]) {
-            let value =  self.previous().literal.as_ref()
+            let value = self.previous().literal.as_ref()
                 .and_then(|s| s.parse::<f64>().ok())
                 .ok_or_else(|| "Invalid number literal".to_string())?;
             Ok(Expr::Literal(LiteralValue::Number(value)))
         } else if self.match_token(&[TokenType::String]) {
-            let value =  self.previous().literal.clone()
+            let value = self.previous().literal.clone()
                 .ok_or_else(|| "Invalid string literal".to_string())?;
             Ok(Expr::Literal(LiteralValue::String(value)))
         } else if self.match_token(&[TokenType::LeftParen]) {
@@ -404,6 +405,11 @@ impl Parser {
             Ok(Expr::Variable(self.previous().clone()))
         } else if self.match_token(&[TokenType::This]) {
             Ok(Expr::This(self.previous().clone()))
+        } else if self.match_token(&[TokenType::Super]) {
+            let keyword = self.previous().clone();
+            self.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
+            let method = self.consume(TokenType::Identifier, "Expect superclass method name.")?;
+            Ok(Expr::Super(keyword, method.clone()))
         } else {
             let token = self.peek();
             Err(format!("Expected expression, found token type {:?} at line {}", token.token_type, token.line))
@@ -490,6 +496,15 @@ impl Parser {
     fn class_declaration(&mut self) -> Result<Stmt, String> {
         let name = self.consume(TokenType::Identifier, "Expect class name.")?.clone();
 
+        // Check for superclass
+        let superclass = if self.match_token(&[TokenType::Less]) {
+            // Parse superclass name after '<'
+            let superclass_name = self.consume(TokenType::Identifier, "Expect superclass name.").map(|token| token.clone())?;
+            Some(Expr::Variable(superclass_name))
+        } else {
+            None
+        };
+
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
 
         let mut methods = Vec::new();
@@ -499,7 +514,7 @@ impl Parser {
 
         self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
 
-        Ok(Stmt::Class { name, methods })
+        Ok(Stmt::Class { name, superclass, methods })
     }
 }
 
@@ -532,5 +547,6 @@ pub fn print_ast(expr: &Expr) -> String {
         Expr::Get(object, name) => format!("(get {} .{})", print_ast(object), name.lexeme),
         Expr::Set(object, name, value) => format!("(set {} .{} {})", print_ast(object), name.lexeme, print_ast(value)),
         Expr::This(keyword) => keyword.lexeme.clone(),
+        Expr::Super(keyword, method) => format!("(super {} .{})", keyword.lexeme, method.lexeme),
     }
 }

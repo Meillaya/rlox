@@ -14,6 +14,7 @@ enum FunctionType {
 enum ClassType {
     None,
     Class,
+    Subclass,
 }
 
 pub struct Resolver {
@@ -23,6 +24,8 @@ pub struct Resolver {
     current_class: ClassType,
     // Maps expressions to their resolved environment depths
     locals: HashMap<usize, usize>,
+    // Store super expressions separately by line number to avoid memory address issues
+    super_expressions: HashMap<usize, usize>, // Line number -> distance
 }
 
 impl Resolver {
@@ -32,6 +35,7 @@ impl Resolver {
             current_function: FunctionType::None,
             current_class: ClassType::None,
             locals: HashMap::new(),
+            super_expressions: HashMap::new(),
         }
     }
 
@@ -53,15 +57,36 @@ impl Resolver {
                 self.end_scope();
                 Ok(())
             },
-            Stmt::Class { name, methods } => {
+            Stmt::Class { name, superclass, methods } => {
                 let enclosing_class = self.current_class;
                 self.current_class = ClassType::Class;
+                
+                eprintln!("Resolver: Resolving class {} with superclass {:?}", name.lexeme, superclass);
 
                 self.declare(name)?;
                 self.define(name);
 
+                // Handle superclass
+                if let Some(superclass_expr) = superclass {
+                    if let Expr::Variable(ref superclass_name) = superclass_expr {
+                        if superclass_name.lexeme == name.lexeme {
+                            return Err(format!("A class cannot inherit from itself at line {}.", superclass_name.line));
+                        }
+                    }
+
+                    // Resolve the superclass expression
+                    self.resolve_expr(superclass_expr)?;
+                    self.current_class = ClassType::Subclass;
+                    
+                    // Create a new scope for 'super'
+                    self.begin_scope();
+                    eprintln!("Resolver: Adding 'super' to scope for class {}", name.lexeme);
+                    self.scopes.last_mut().unwrap().insert("super".to_string(), true);
+                }
+
                 self.begin_scope(); // Scope for methods and 'this'
                 // Define 'this' within the class scope
+                eprintln!("Resolver: Adding 'this' to scope for class {}", name.lexeme);
                 self.scopes.last_mut().unwrap().insert("this".to_string(), true);
 
                 for method in methods {
@@ -73,6 +98,7 @@ impl Resolver {
                          } else {
                              FunctionType::Method
                          };
+                         eprintln!("Resolver: Resolving method {} in class {}", method_name.lexeme, name.lexeme);
                          self.resolve_function(params, body, declaration)?;
                     } else {
                          // Should not happen if parser is correct
@@ -81,6 +107,13 @@ impl Resolver {
                 }
 
                 self.end_scope(); // End class scope
+                
+                // End superclass scope if we have one
+                if superclass.is_some() {
+                    eprintln!("Resolver: Ending superclass scope for {}", name.lexeme);
+                    self.end_scope();
+                }
+                
                 self.current_class = enclosing_class;
                 Ok(())
             },
@@ -221,6 +254,36 @@ impl Resolver {
                 self.resolve_local(expr, keyword);
                 Ok(())
             },
+            Expr::Super(keyword, _) => {
+                match self.current_class {
+                    ClassType::None => {
+                        eprintln!("Resolver Error: Cannot use 'super' outside of a class at line {}", keyword.line);
+                        return Err(format!("Cannot use 'super' outside of a class at line {}.", keyword.line));
+                    },
+                    ClassType::Class => {
+                        eprintln!("Resolver Error: Cannot use 'super' in a class with no superclass at line {}", keyword.line);
+                        return Err(format!("Cannot use 'super' in a class with no superclass at line {}.", keyword.line));
+                    },
+                    ClassType::Subclass => {
+                        // This is valid - resolve 'super' by line number for more stable reference
+                        eprintln!("Resolver: Resolving 'super' in subclass at line {}", keyword.line);
+                        
+                        // Look for 'super' in the scopes
+                        for (i, scope) in self.scopes.iter().rev().enumerate() {
+                            if scope.contains_key("super") {
+                                // Store distance by line number for super expressions
+                                eprintln!("  Found 'super' at distance {} (line: {})", i, keyword.line);
+                                self.super_expressions.insert(keyword.line, i);
+                                break;
+                            }
+                        }
+                        
+                        // Also do traditional resolution
+                        self.resolve_local(expr, keyword);
+                    },
+                }
+                Ok(())
+            },
         }
     }
 
@@ -256,20 +319,21 @@ impl Resolver {
     }
 
     fn resolve_local(&mut self, expr: &Expr, name: &Token) {
+        eprintln!("Resolver: Resolving local variable '{}' at line {}", name.lexeme, name.line);
+        
         // Search from innermost to outermost scope
         for (i, scope) in self.scopes.iter().rev().enumerate() {
+            eprintln!("  Checking scope {}: {:?}", i, scope.keys().collect::<Vec<_>>());
             if scope.contains_key(&name.lexeme) {
                 // Found it! Store the distance in the locals map
                 let expr_id = self.get_expr_id(expr);
                 self.locals.insert(expr_id, i);
-                // DEBUG PRINT: Log resolved local variables
-                // eprintln!("[Resolver] Resolved local: '{}' at distance {} (Expr ID: {})", name.lexeme, i, expr_id);
+                eprintln!("  Found '{}' at distance {} (Expr ID: {})", name.lexeme, i, expr_id);
                 return;
             }
         }
         // Not found. Assume it is global.
-        // DEBUG PRINT: Log assumed global variables
-        // eprintln!("[Resolver] Assuming global: '{}' (Expr ID: {})", name.lexeme, self.get_expr_id(expr));
+        eprintln!("  '{}' not found in any scope, assuming global", name.lexeme);
     }
 
     // Generate a unique ID for an expression based on its memory address
@@ -279,5 +343,10 @@ impl Resolver {
 
     pub fn get_locals(&self) -> &HashMap<usize, usize> {
         &self.locals
+    }
+
+    // Add method to get super expressions for the interpreter
+    pub fn get_super_expressions(&self) -> &HashMap<usize, usize> {
+        &self.super_expressions
     }
 }

@@ -120,6 +120,8 @@ fn main() {
                             match resolver.resolve(&*statements_rc) { // Pass slice via deref
                                 Ok(_) => {
                                     interpreter.set_locals(resolver.get_locals().clone());
+                                    // Also set super expressions
+                                    interpreter.set_super_expressions(resolver.get_super_expressions().clone());
                                     
                                     // Call interpret with statements slice
                                     match interpreter.interpret(&*statements_rc, true) {
@@ -173,6 +175,8 @@ fn main() {
                             match resolver.resolve(&*statements_rc) { // Pass slice via deref
                                 Ok(_) => {
                                     interpreter.set_locals(resolver.get_locals().clone());
+                                    // Also set super expressions
+                                    interpreter.set_super_expressions(resolver.get_super_expressions().clone());
                                     
                                     // Call interpret with statements slice
                                     match interpreter.interpret(&*statements_rc, false) {

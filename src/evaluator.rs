@@ -18,17 +18,28 @@ pub trait LoxCallable: fmt::Debug {
 #[derive(Debug, Clone)]
 pub struct LoxClass {
     name: String,
+    superclass: Option<Rc<LoxClass>>, // Add superclass field
     methods: HashMap<String, Rc<LoxFunction>>, // Store methods by name
 }
 
 impl LoxClass {
-    fn new(name: String, methods: HashMap<String, Rc<LoxFunction>>) -> Self {
-        LoxClass { name, methods }
+    fn new(name: String, superclass: Option<Rc<LoxClass>>, methods: HashMap<String, Rc<LoxFunction>>) -> Self {
+        LoxClass { name, superclass, methods }
     }
 
     // Method to find a method by name
     fn find_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
-        self.methods.get(name).cloned()
+        // First check if the method exists in this class
+        if let Some(method) = self.methods.get(name) {
+            return Some(method.clone());
+        }
+        
+        // If not found, check the superclass
+        if let Some(superclass) = &self.superclass {
+            return superclass.find_method(name);
+        }
+        
+        None
     }
 }
 
@@ -402,6 +413,7 @@ pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
     globals: Rc<RefCell<Environment>>,
     locals: HashMap<usize, usize>,
+    super_expressions: HashMap<usize, usize>, // Line number -> distance
 }
 
 impl Interpreter {
@@ -422,6 +434,7 @@ impl Interpreter {
             environment: Rc::clone(&globals),
             globals,
             locals: HashMap::new(),
+            super_expressions: HashMap::new(),
         }
     }
     
@@ -436,6 +449,10 @@ impl Interpreter {
     fn get_expr_id(&self, expr: &Expr) -> usize { expr as *const _ as usize }
     
     pub fn set_locals(&mut self, locals: HashMap<usize, usize>) { self.locals = locals; }
+    
+    pub fn set_super_expressions(&mut self, super_exprs: HashMap<usize, usize>) { 
+        self.super_expressions = super_exprs; 
+    }
     
     fn look_up_variable(&mut self, name: &Token, expr: &Expr) -> Result<Value, RuntimeError> {
         let expr_id = self.get_expr_id(expr);
@@ -492,24 +509,67 @@ impl Interpreter {
                 self.environment.borrow_mut().define(name_token.lexeme.clone(), Value::Function(Rc::new(function)));
                 Ok(())
             },
-            Stmt::Class { name, methods } => {
+            Stmt::Class { name, superclass, methods } => {
                 // Define the class name first (allows classes to refer to themselves)
                 self.environment.borrow_mut().define(name.lexeme.clone(), Value::Nil); // Temporarily Nil
+                
+                // If there's a superclass, evaluate it
+                let superclass_value = if let Some(superclass_expr) = superclass {
+                    let value = self.evaluate(superclass_expr)?;
+                    // Validate it's a class
+                    match value {
+                        Value::Class(class) => {
+                            if let Expr::Variable(ref superclass_name) = superclass_expr {
+                                // Check for self inheritance
+                                if superclass_name.lexeme == name.lexeme {
+                                    return Err(RuntimeError::new(
+                                        format!("A class cannot inherit from itself: {}", name.lexeme),
+                                        name.line
+                                    ));
+                                }
+                            }
+                            Some(class)
+                        },
+                        _ => {
+                            return Err(RuntimeError::new(
+                                format!("Superclass must be a class, got {}", value),
+                                name.line
+                            ));
+                        }
+                    }
+                } else {
+                    None
+                };
+                
+                // Create a new environment if we have a superclass to define "super"
+                let methods_env = if superclass_value.is_some() {
+                    // Create a new environment where "super" refers to the superclass
+                    let enclosing = Rc::clone(&self.environment);
+                    let new_env = Rc::new(RefCell::new(Environment::new_with_enclosing(enclosing)));
+                    // Define "super" in this environment
+                    if let Some(ref superclass) = superclass_value {
+                        new_env.borrow_mut().define("super".to_string(), Value::Class(Rc::clone(superclass)));
+                    }
+                    new_env
+                } else {
+                    // No superclass, just use the current environment
+                    Rc::clone(&self.environment)
+                };
                 
                 let mut class_methods = HashMap::new();
                 for method_stmt_variant in methods {
                     // We expect Stmt::Function here, clone it for Rc
                     if let Stmt::Function(method_name, _, _) = method_stmt_variant {
                          let method_stmt_rc = Rc::new(method_stmt_variant.clone());
-                         // Methods capture the environment where the CLASS is defined
-                         let function = LoxFunction::new(method_stmt_rc, Rc::clone(&self.environment));
+                         // Methods capture the environment where we define "super"
+                         let function = LoxFunction::new(method_stmt_rc, Rc::clone(&methods_env));
                          class_methods.insert(method_name.lexeme.clone(), Rc::new(function));
                     } else {
                          return Err(RuntimeError::new(format!("Invalid statement in class '{}' body. Expected method.", name.lexeme), name.line));
                     }
                 }
                 
-                let klass = LoxClass::new(name.lexeme.clone(), class_methods);
+                let klass = LoxClass::new(name.lexeme.clone(), superclass_value, class_methods);
                 let class_value = Value::Class(Rc::new(klass));
 
                 // Now assign the actual class value, overwriting the temporary Nil
@@ -699,6 +759,64 @@ impl Interpreter {
             },
             Expr::This(keyword) => {
                 self.look_up_variable(keyword, expr)
+            },
+            Expr::Super(keyword, method) => {
+                // First, try to look up by line number which is more stable
+                let distance = if let Some(&dist) = self.super_expressions.get(&keyword.line) {
+                    eprintln!("Evaluator: Found super at line {} with distance {}", keyword.line, dist);
+                    dist
+                } else {
+                    // Fall back to the original method using expr ID
+                    let expr_id = self.get_expr_id(expr);
+                    match self.locals.get(&expr_id) {
+                        Some(d) => *d,
+                        None => {
+                            return Err(RuntimeError::new(
+                                format!("Undefined 'super' keyword at line {}", keyword.line),
+                                keyword.line
+                            ));
+                        }
+                    }
+                };
+                
+                // Find the superclass
+                let superclass = match self.environment.borrow().get_at(distance - 1, "super") {
+                    Some(Value::Class(class)) => class,
+                    _ => {
+                        return Err(RuntimeError::new(
+                            format!("Couldn't resolve superclass reference at line {}", keyword.line),
+                            keyword.line
+                        ));
+                    }
+                };
+                
+                // Get the instance (this)
+                let this_token = Token {
+                    token_type: TokenType::This,
+                    lexeme: "this".to_string(),
+                    literal: None,
+                    line: keyword.line,
+                };
+                let instance = self.environment.borrow().get(&this_token)
+                    .map_err(|_| RuntimeError::new(
+                        format!("Couldn't resolve 'this' inside 'super' at line {}", keyword.line),
+                        keyword.line
+                    ))?;
+                
+                // Find the method in the superclass
+                let method_name = &method.lexeme;
+                let method = match superclass.find_method(method_name) {
+                    Some(m) => m,
+                    None => {
+                        return Err(RuntimeError::new(
+                            format!("Undefined property '{}' on superclass at line {}", method_name, keyword.line),
+                            keyword.line
+                        ));
+                    }
+                };
+                
+                // Bind the method to the current instance
+                Ok(Value::BoundMethod(Rc::new(method.bind(instance))))
             }
         }
     }
