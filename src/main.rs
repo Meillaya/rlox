@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -8,11 +7,13 @@ use std::rc::Rc;
 mod tokenizer;
 mod parser;
 mod evaluator;
+mod environment;
+mod resolver;
 
-use evaluator::RuntimeError;
+use evaluator::{RuntimeError, Interpreter};
 use tokenizer::{Tokenizer, TokenType, Token};
 use parser::{Parser, print_ast};
-use evaluator::{Environment,execute_stmt};
+use resolver::Resolver;
 
 fn read_and_tokenize(filename: &str) -> Result<Vec<Token>, String> {
     let file_contents = fs::read_to_string(filename).unwrap_or_else(|_| {
@@ -108,23 +109,38 @@ fn main() {
                     let mut parser = Parser::new(tokens);
                     match parser.parse() {
                         Ok(statements) => {
-                            let env = Rc::new(RefCell::new(Environment::new()));
-                            env.borrow_mut().define_natives(); // Add this line
-                            for stmt in statements {
-                                match execute_stmt(&stmt, true, Rc::clone(&env)) {
-                                    Ok(_) => {},
-                                    Err(runtime_error) => {
-                                        match runtime_error {
-                                            RuntimeError::Error { message, line } => {
-                                                eprintln!("{} [line {}]", message, line);
-                                                process::exit(70);
-                                            },
-                                            RuntimeError::Return(_) => {
-                                                // Return statements should be handled within function calls
-                                                process::exit(70);
+                            // Wrap statements in Rc for the interpreter
+                            let statements_rc = Rc::new(statements);
+                            
+                            // Pass Rc to Interpreter::new
+                            let mut interpreter = Interpreter::new(Rc::clone(&statements_rc));
+                            
+                            // Resolve variables (still needs statements slice)
+                            let mut resolver = Resolver::new();
+                            match resolver.resolve(&*statements_rc) { // Pass slice via deref
+                                Ok(_) => {
+                                    interpreter.set_locals(resolver.get_locals().clone());
+                                    
+                                    // Call interpret with statements slice
+                                    match interpreter.interpret(&*statements_rc, true) {
+                                        Ok(_) => {},
+                                        Err(runtime_error) => {
+                                            match runtime_error {
+                                                RuntimeError::Error { message, line } => {
+                                                    eprintln!("{} [line {}]", message, line);
+                                                    process::exit(70);
+                                                },
+                                                RuntimeError::Return(_) => {
+                                                    // Return statements should be handled within function calls
+                                                    process::exit(70);
+                                                }
                                             }
                                         }
                                     }
+                                },
+                                Err(error) => {
+                                    eprintln!("Error: {}", error);
+                                    process::exit(65);
                                 }
                             }
                         },
@@ -146,23 +162,38 @@ fn main() {
                     let mut parser = Parser::new(tokens);
                     match parser.parse() {
                         Ok(statements) => {
-                            let env = Rc::new(RefCell::new(Environment::new()));
-                            env.borrow_mut().define_natives(); // Add this line
-                            for stmt in statements {
-                                match execute_stmt(&stmt, false, Rc::clone(&env)) {
-                                    Ok(_) => {},
-                                    Err(runtime_error) => {
-                                        match runtime_error {
-                                            RuntimeError::Error { message, line } => {
-                                                eprintln!("{} [line {}]", message, line);
-                                                process::exit(70);
-                                            },
-                                            RuntimeError::Return(_) => {
-                                                // Return statements should be handled within function calls
-                                                process::exit(70);
+                            // Wrap statements in Rc for the interpreter
+                            let statements_rc = Rc::new(statements);
+
+                            // Pass Rc to Interpreter::new
+                            let mut interpreter = Interpreter::new(Rc::clone(&statements_rc));
+
+                            // Resolve variables (still needs statements slice)
+                            let mut resolver = Resolver::new();
+                            match resolver.resolve(&*statements_rc) { // Pass slice via deref
+                                Ok(_) => {
+                                    interpreter.set_locals(resolver.get_locals().clone());
+                                    
+                                    // Call interpret with statements slice
+                                    match interpreter.interpret(&*statements_rc, false) {
+                                        Ok(_) => {},
+                                        Err(runtime_error) => {
+                                            match runtime_error {
+                                                RuntimeError::Error { message, line } => {
+                                                    eprintln!("{} [line {}]", message, line);
+                                                    process::exit(70);
+                                                },
+                                                RuntimeError::Return(_) => {
+                                                    // Return statements should be handled within function calls
+                                                    process::exit(70);
+                                                }
                                             }
                                         }
                                     }
+                                },
+                                Err(error) => {
+                                    eprintln!("Error: {}", error);
+                                    process::exit(65);
                                 }
                             }
                         },

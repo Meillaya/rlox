@@ -10,6 +10,7 @@ pub enum Stmt {
     While(Expr, Box<Stmt>),
     Function(Token, Vec<Token>, Vec<Stmt>),
     Return(Token, Option<Expr>),
+    Class { name: Token, methods: Vec<Stmt> },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -78,7 +79,6 @@ impl Parser {
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>, String> {
-
         let mut statements = Vec::new();
 
         while !self.check(TokenType::RightBrace) && !self.is_at_end() {
@@ -144,6 +144,9 @@ impl Parser {
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
         if self.match_token(&[TokenType::Return]) {
             return self.return_statement();
+        }
+        if self.match_token(&[TokenType::Class]) {
+            return self.class_declaration();
         }
         if self.match_token(&[TokenType::Fun]) {
             return self.function("function");
@@ -464,6 +467,21 @@ impl Parser {
 
     fn previous(&self) -> &Token {
         &self.tokens[self.current - 1]
+    }
+
+    fn class_declaration(&mut self) -> Result<Stmt, String> {
+        let name = self.consume(TokenType::Identifier, "Expect class name.")?.clone();
+
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.")?;
+
+        let mut methods = Vec::new();
+        while !self.check(TokenType::RightBrace) && !self.is_at_end() {
+            methods.push(self.function("method")?);
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.")?;
+
+        Ok(Stmt::Class { name, methods })
     }
 }
 
