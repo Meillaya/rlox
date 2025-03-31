@@ -2,16 +2,25 @@ use std::collections::HashMap;
 use crate::parser::{Expr, Stmt};
 use crate::tokenizer::Token;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum FunctionType {
     None,
     Function,
+    Method,
+    Initializer,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum ClassType {
+    None,
+    Class,
 }
 
 pub struct Resolver {
     // Stack of scopes for variable resolution
     scopes: Vec<HashMap<String, bool>>,
     current_function: FunctionType,
+    current_class: ClassType,
     // Maps expressions to their resolved environment depths
     locals: HashMap<usize, usize>,
 }
@@ -21,6 +30,7 @@ impl Resolver {
         Resolver {
             scopes: Vec::new(),
             current_function: FunctionType::None,
+            current_class: ClassType::None,
             locals: HashMap::new(),
         }
     }
@@ -44,9 +54,34 @@ impl Resolver {
                 Ok(())
             },
             Stmt::Class { name, methods } => {
+                let enclosing_class = self.current_class;
+                self.current_class = ClassType::Class;
+
                 self.declare(name)?;
                 self.define(name);
-                // Note: Methods will be resolved later when instances are created
+
+                self.begin_scope(); // Scope for methods and 'this'
+                // Define 'this' within the class scope
+                self.scopes.last_mut().unwrap().insert("this".to_string(), true);
+
+                for method in methods {
+                    // Resolve each method within the class scope
+                    if let Stmt::Function(method_name, params, body) = method {
+                         // Check if this is an initializer
+                         let declaration = if method_name.lexeme == "init" {
+                             FunctionType::Initializer
+                         } else {
+                             FunctionType::Method
+                         };
+                         self.resolve_function(params, body, declaration)?;
+                    } else {
+                         // Should not happen if parser is correct
+                         return Err(format!("Invalid statement in class body at line {}", name.line));
+                    }
+                }
+
+                self.end_scope(); // End class scope
+                self.current_class = enclosing_class;
                 Ok(())
             },
             Stmt::Expression(expr) => self.resolve_expr(expr),
@@ -75,6 +110,11 @@ impl Resolver {
                     return Err(format!("Cannot return from top-level code at line {}.", keyword.line));
                 }
 
+                // Check for returning a value from an initializer
+                if self.current_function == FunctionType::Initializer && value.is_some() {
+                    return Err(format!("Can't return a value from an initializer at line {}.", keyword.line));
+                }
+
                 if let Some(value) = value {
                     self.resolve_expr(value)?;
                 }
@@ -99,7 +139,7 @@ impl Resolver {
     }
 
     fn resolve_function(&mut self, params: &[Token], body: &[Stmt], function_type: FunctionType) -> Result<(), String> {
-        let enclosing_function = self.current_function.clone();
+        let enclosing_function = self.current_function;
         self.current_function = function_type;
 
         self.begin_scope();
@@ -157,6 +197,15 @@ impl Resolver {
                 
                 Ok(())
             },
+            Expr::Get(object, _name) => {
+                self.resolve_expr(object)?;
+                Ok(())
+            },
+            Expr::Set(object, _name, value) => {
+                self.resolve_expr(value)?;
+                self.resolve_expr(object)?;
+                Ok(())
+            },
             Expr::Grouping(expr) => self.resolve_expr(expr),
             Expr::Literal(_) => Ok(()),
             Expr::Logical(left, _operator, right) => {
@@ -165,6 +214,13 @@ impl Resolver {
                 Ok(())
             },
             Expr::Unary(_operator, right) => self.resolve_expr(right),
+            Expr::This(keyword) => {
+                if self.current_class == ClassType::None {
+                    return Err(format!("Cannot use 'this' outside of a class at line {}.", keyword.line));
+                }
+                self.resolve_local(expr, keyword);
+                Ok(())
+            },
         }
     }
 
@@ -207,13 +263,13 @@ impl Resolver {
                 let expr_id = self.get_expr_id(expr);
                 self.locals.insert(expr_id, i);
                 // DEBUG PRINT: Log resolved local variables
-                eprintln!("[Resolver] Resolved local: '{}' at distance {} (Expr ID: {})", name.lexeme, i, expr_id);
+                // eprintln!("[Resolver] Resolved local: '{}' at distance {} (Expr ID: {})", name.lexeme, i, expr_id);
                 return;
             }
         }
         // Not found. Assume it is global.
         // DEBUG PRINT: Log assumed global variables
-        eprintln!("[Resolver] Assuming global: '{}' (Expr ID: {})", name.lexeme, self.get_expr_id(expr));
+        // eprintln!("[Resolver] Assuming global: '{}' (Expr ID: {})", name.lexeme, self.get_expr_id(expr));
     }
 
     // Generate a unique ID for an expression based on its memory address

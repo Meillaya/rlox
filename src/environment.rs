@@ -3,9 +3,9 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use crate::tokenizer::Token;
-use crate::evaluator::{Value, RuntimeError};
+use crate::evaluator::{Value, RuntimeError, NativeFn};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Environment {
     values: HashMap<String, Value>,
     enclosing: Option<Rc<RefCell<Environment>>>,
@@ -89,11 +89,19 @@ impl Environment {
     }
 
     pub fn define_natives(&mut self) {
-        self.define("clock".to_string(), Value::NativeFunction(|| {
+        let clock_native = NativeFn(|_interpreter, _arguments| {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap();
-            Value::Number(now.as_secs_f64())
-        }));
+            Ok(Value::Number(now.as_secs_f64()))
+        });
+        self.define("clock".to_string(), Value::NativeFunction(Rc::new(clock_native)));
+    }
+
+    pub fn clone(&self) -> Self {
+        Environment {
+            values: self.values.clone(),
+            enclosing: self.enclosing.clone(),
+        }
     }
 }

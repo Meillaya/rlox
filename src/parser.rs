@@ -23,6 +23,9 @@ pub enum Expr {
     Assign(Token, Box<Expr>),
     Logical(Box<Expr>, Token, Box<Expr>),
     Call(Box<Expr>, Token, Vec<Expr>),
+    Get(Box<Expr>, Token),
+    Set(Box<Expr>, Token, Box<Expr>),
+    This(Token),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -275,11 +278,17 @@ impl Parser {
             let equals = self.previous().clone();
             let value = self.assignment()?;
     
-            if let Expr::Variable(name) = expr {
-                return Ok(Expr::Assign(name, Box::new(value)));
+            match expr {
+                Expr::Variable(name) => {
+                    return Ok(Expr::Assign(name, Box::new(value)));
+                },
+                Expr::Get(object, name) => {
+                    return Ok(Expr::Set(object, name, Box::new(value)));
+                },
+                _ => {
+                    return Err(format!("Invalid assignment target at line {}", equals.line));
+                }
             }
-    
-            return Err(format!("Invalid assignment target at line {}", equals.line));
         }
     
         Ok(expr)
@@ -362,28 +371,60 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr, String> {
-
         if self.match_token(&[TokenType::Minus, TokenType::Bang]) {
             let operator = self.previous().clone();
             let right = self.unary()?;
             Ok(Expr::Unary(operator, Box::new(right)))
         } else {
-            self.primary()
+            self.call_or_get()
         }
     }
 
     fn primary(&mut self) -> Result<Expr, String> {
-        let expr = if self.match_token(&[TokenType::LeftParen]) {
+        if self.match_token(&[TokenType::False]) {
+            Ok(Expr::Literal(LiteralValue::Boolean(false)))
+        } else if self.match_token(&[TokenType::True]) {
+            Ok(Expr::Literal(LiteralValue::Boolean(true)))
+        } else if self.match_token(&[TokenType::Nil]) {
+            Ok(Expr::Literal(LiteralValue::Nil))
+        } else if self.match_token(&[TokenType::Number]) {
+            let value =  self.previous().literal.as_ref()
+                .and_then(|s| s.parse::<f64>().ok())
+                .ok_or_else(|| "Invalid number literal".to_string())?;
+            Ok(Expr::Literal(LiteralValue::Number(value)))
+        } else if self.match_token(&[TokenType::String]) {
+            let value =  self.previous().literal.clone()
+                .ok_or_else(|| "Invalid string literal".to_string())?;
+            Ok(Expr::Literal(LiteralValue::String(value)))
+        } else if self.match_token(&[TokenType::LeftParen]) {
             let expr = self.expression()?;
             self.consume(TokenType::RightParen, "Expected ')' after expression")?;
-            Expr::Grouping(Box::new(expr))
+            Ok(Expr::Grouping(Box::new(expr)))
         } else if self.match_token(&[TokenType::Identifier]) {
-            Expr::Variable(self.previous().clone())
+            Ok(Expr::Variable(self.previous().clone()))
+        } else if self.match_token(&[TokenType::This]) {
+            Ok(Expr::This(self.previous().clone()))
         } else {
-            self.literal()?
-        };
-    
-        self.call(expr)
+            let token = self.peek();
+            Err(format!("Expected expression, found token type {:?} at line {}", token.token_type, token.line))
+        }
+    }
+
+    fn call_or_get(&mut self) -> Result<Expr, String> {
+        let mut expr = self.primary()?;
+
+        loop {
+            if self.match_token(&[TokenType::LeftParen]) {
+                expr = self.finish_call(expr)?;
+            } else if self.match_token(&[TokenType::Dot]) {
+                let name = self.consume(TokenType::Identifier, "Expect property name after '.'.")?.clone();
+                expr = Expr::Get(Box::new(expr), name);
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
     }
 
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, String> {
@@ -407,29 +448,6 @@ impl Parser {
             Ok(self.advance())
         } else {
             Err(message.to_string())
-        }
-    }
-
-    fn literal(&mut self) -> Result<Expr, String> {
-        if self.match_token(&[TokenType::False]) {
-            Ok(Expr::Literal(LiteralValue::Boolean(false)))
-        } else if self.match_token(&[TokenType::True]) {
-            Ok(Expr::Literal(LiteralValue::Boolean(true)))
-        } else if self.match_token(&[TokenType::Nil]) {
-            Ok(Expr::Literal(LiteralValue::Nil))
-        } else if self.match_token(&[TokenType::Number]) {
-            let value =  self.previous().literal.as_ref()
-                .and_then(|s| s.parse::<f64>().ok())
-                .ok_or_else(|| "Invalid number literal".to_string())?;
-            Ok(Expr::Literal(LiteralValue::Number(value)))
-        } else if self.match_token(&[TokenType::String]) {
-            let value =  self.previous().literal.clone()
-                .ok_or_else(|| "Invalid string literal".to_string())?;
-            Ok(Expr::Literal(LiteralValue::String(value)))
-        }
-        
-         else {
-            Err("Expected literal".to_string())
         }
     }
 
@@ -504,12 +522,15 @@ pub fn print_ast(expr: &Expr) -> String {
         Expr::Assign(token, expr) => format!("({} = {})", token.lexeme, print_ast(expr)),
         Expr::Logical(expr, token, expr1) => 
             format!("({} {} {})", print_ast(expr), token.lexeme, print_ast(expr1)),
-            Expr::Call(callee, _paren, arguments) => {
-                let mut result = format!("(call {})", print_ast(callee));
-                for arg in arguments {
-                    result.push_str(&format!(" {}", print_ast(arg)));
-                }
-                result
+        Expr::Call(callee, _paren, arguments) => {
+            let mut result = format!("(call {})", print_ast(callee));
+            for arg in arguments {
+                result.push_str(&format!(" {}", print_ast(arg)));
             }
+            result
+        },
+        Expr::Get(object, name) => format!("(get {} .{})", print_ast(object), name.lexeme),
+        Expr::Set(object, name, value) => format!("(set {} .{} {})", print_ast(object), name.lexeme, print_ast(value)),
+        Expr::This(keyword) => keyword.lexeme.clone(),
     }
 }

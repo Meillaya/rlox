@@ -293,7 +293,26 @@ fn scan_token(&mut self) {
         }
     
         let text = &self.source[self.start..self.current];
-        let token_type = KEYWORDS.get(text).cloned().unwrap_or(TokenType::Identifier);
+        let token_type = match text { 
+            "and" => TokenType::And,
+            "class" => TokenType::Class,
+            "else" => TokenType::Else,
+            "false" => TokenType::False,
+            "for" => TokenType::For,
+            "fun" => TokenType::Fun,
+            "if" => TokenType::If,
+            "nil" => TokenType::Nil,
+            "or" => TokenType::Or,
+            "print" => TokenType::Print,
+            "return" => TokenType::Return,
+            "super" => TokenType::Super,
+            "this" => TokenType::This,
+            "true" => TokenType::True,
+            "var" => TokenType::Var,
+            "while" => TokenType::While,
+            "_" => TokenType::Identifier,
+            _ => TokenType::Identifier,
+        };
         self.add_token(token_type);
     }
     
