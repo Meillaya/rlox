@@ -256,4 +256,4 @@ Possible improvements to the interpreter:
 - [Crafting Interpreters](https://craftinginterpreters.com/) by Robert Nystrom
 - [The Rust Programming Language](https://doc.rust-lang.org/book/)
 - [Rust Reference](https://doc.rust-lang.org/reference/)
--[Codecrafters](https://app.codecrafters.io/courses/interpreter) For testing
+- [Codecrafters](https://app.codecrafters.io/courses/interpreter) For testing
