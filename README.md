@@ -49,11 +49,6 @@ cargo run -- parse path/to/script.lox
 cargo run -- evaluate path/to/script.lox
 ```
 
-
-## Technical Implementation Details
-
-The interpreter is implemented in distinct phases: **scanning** (tokenizer.rs) converts source code into tokens with type, lexeme, literal value, and line number, handling keywords, literals, operators, and comments. **Parsing** (parser.rs) uses a recursive descent approach to build an AST with `Expr` and `Stmt` nodes for expressions, statements, control flow, functions, and classes. **Static analysis** (resolver.rs) resolves variable scopes, detects usage errors, and validates declarations. The **runtime environment** (environment.rs) manages hierarchical scopes, variable storage, and lookups. Finally, **evaluation** (evaluator.rs) executes the AST, supporting expression/statement evaluation, functions, methods, classes, inheritance, closures, and reference-counted memory management.
-
 ## References
 
 - [Crafting Interpreters](https://craftinginterpreters.com/) by Robert Nystrom
